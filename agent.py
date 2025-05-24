@@ -12,11 +12,11 @@ class Agent:
         final_epsilon: float,
         discount_factor: float,
 
-        state_discretizer=None,
+        obs_discretizer=None,
         action_discretizer=None
     ):
         self.env = env
-        self.agent_state_space = state_discretizer
+        self.agent_state_space = obs_discretizer
         self.agent_action_space = action_discretizer
 
         self.num_actions = np.prod(self.agent_action_space.space.nvec)

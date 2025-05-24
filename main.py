@@ -5,11 +5,11 @@ from env import LinearModelF16
 from agent import QLearning
 from data.LinearF16SS import A_long_hi as A, B_long_hi as B
 from utils.discretizer import UniformTileCoding
-from utils.plots import reward_length_learning_error_plot
+from utils.plots import reward_length_learning_error_plot, plot_test_episode
 
-# hyperparameters
+# hyperparameters 
 learning_rate = 0.05
-n_epsiodes = 100
+n_epsiodes = 10
 start_epsilon = 1.0
 epsilon_decay = start_epsilon / (n_epsiodes / 2)
 final_epsilon = 0.1
@@ -24,8 +24,8 @@ agent = QLearning(
     epsilon_decay=epsilon_decay,
     final_epsilon=final_epsilon,
     discount_factor=0.95,
-    state_discretizer=UniformTileCoding(
-        env.observation_space, bins=(10, 10, 10, 10, 10, 10, 10, 10)
+    obs_discretizer=UniformTileCoding(
+        env.observation_space , bins=(10, 10, 10, 10, 10, 10, 10, 10)
     ),
     action_discretizer=UniformTileCoding(env.action_space, bins=(10, 10)),
 )
@@ -44,5 +44,5 @@ for episode in tqdm(range(n_epsiodes)):
 
 # plot_best_action(agent, agent.agent_state_space)
 
-# plot_test_episode(agent, env, n_steps=1000)
-reward_length_learning_error_plot(env, agent, rolling_length=50)
+plot_test_episode(agent, env, n_steps=1000)
+#reward_length_learning_error_plot(env, agent, rolling_length=50)

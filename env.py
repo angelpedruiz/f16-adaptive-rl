@@ -24,13 +24,13 @@ class LinearModelF16(gym.Env):
             50,
             100.0,
             10,
-            1000,
+            10000,
             200,
             15,
         ]
-        action_deviations = [100, 10]
-        self.lower_obs_bounds = np.concatenate([np.array([-s for s in state_deviations]), np.array([0])])
-        self.upper_obs_bounds = np.concatenate([np.array(state_deviations), np.array([state_deviations[4] * 2])])
+        action_deviations = [0.00001, 0.00001]
+        self.lower_state_bounds = np.array([-s for s in state_deviations])
+        self.upper_state_bounds = np.array(state_deviations)
         self.lower_action_bounds = np.array([-a for a in action_deviations])
         self.upper_action_bounds = np.array(action_deviations)
 
@@ -41,7 +41,9 @@ class LinearModelF16(gym.Env):
             dtype=np.float64,
         )
         self.observation_space = spaces.Box(
-            low=self.lower_obs_bounds, high=self.upper_obs_bounds, dtype=np.float64
+            low=np.concatenate([self.lower_state_bounds, np.array([0])]),
+            high=np.concatenate([self.upper_state_bounds, np.array([self.upper_state_bounds[4] * 2])]),
+            dtype=np.float64
         )
 
         self.state = np.zeros(self.state_dim)
@@ -103,8 +105,8 @@ class LinearModelF16(gym.Env):
             True
             if np.any(
                 np.logical_or(
-                    self.state < self.lower_obs_bounds[:-1],
-                    self.state > self.upper_obs_bounds[:-1],
+                    self.state < self.lower_state_bounds,
+                    self.state > self.upper_state_bounds
                 )
             )
             else False
