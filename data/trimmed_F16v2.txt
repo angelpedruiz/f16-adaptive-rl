@@ -1,0 +1,291 @@
+TRIMMED F16 V2.0
+
+Using FindF16Dynamics linearizing the entire model and then extracting both the longitudinal and lateral directional modes.
+
+
+	h = 15000 ft
+	V = 500 ft
+
+High Fi:
+
+	cost   = 7.1856e-06
+	thrust = 2109.4129 lb
+	elev   = -2.2441 deg
+	ail    = -0.093578 deg
+	rud    = 0.094469 deg
+	alpha  = 4.5307 deg
+	dLEF   = 6.2816 deg
+	Vel.   = 500ft/s
+
+Low Fi:
+
+	cost   = 4.2881e-29
+	thrust = 2120.6214 lb
+	elev   = -2.4607 deg
+	ail    = 4.2733e-15 deg
+	rud    = 3.6479e-14 deg
+	alpha  = 4.4655 deg
+	dLEF   = 0 deg
+	Vel.   = 500ft/s
+
+High Fidelity Trimmed Flight Condition:
+---------------------------------------
+Altitude:        15000.00 ft  [5000, 40000]
+Velocity:        500.00 ft/s  [300, 900]
+AOA (alpha):     0.0791 rad (4.53 deg) [-20deg, 90deg]
+Pitch rate (q):  0.0000 rad/s 
+Pitch angle:     0.0791 rad (4.53 deg) 
+Thrust:          2109.41 lbs  [1000, 19000]
+Elevator angle:  -2.24 deg [-25, 25]
+
+Low Fidelity Trimmed Flight Condition:
+--------------------------------------
+Altitude:        15000.00 ft
+Velocity:        500.00 ft/s
+AOA (alpha):     0.0779 rad (4.47 deg) [-10deg, 45deg]
+Pitch rate (q):  0.0000 rad/s
+Pitch angle:     0.0779 rad (4.47 deg)
+Thrust:          2120.62 lbs
+Elevator angle:  -2.46 deg
+
+
+NOTE: For the following state space matrices angles are given in degrees, distances in feet and time in seconds.
+
+
+----- Longitudinal High Fidelity Model Matrices -----
+A_long_hi =
+  Columns 1 through 6
+
+         0  500.0000   -0.0000 -500.0000         0         0
+         0         0         0         0    1.0000         0
+    0.0001  -32.1700   -0.0132   -2.6686   -1.1863    0.0016
+    0.0000   -0.0000   -0.0003   -0.6761    0.9392   -0.0000
+    0.0000         0   -0.0000   -0.5757   -0.8741         0
+         0         0         0         0         0   -1.0000
+         0         0         0         0         0         0
+
+  Column 7
+
+         0
+         0
+    0.0387
+   -0.0014
+   -0.1188
+         0
+  -20.2000
+
+B_long_hi =
+         0         0
+         0         0
+         0         0
+         0         0
+         0         0
+    1.0000         0
+         0   20.2000
+
+C_long_hi =
+  Columns 1 through 6
+
+    1.0000         0         0         0         0         0
+         0   57.2958         0         0         0         0
+         0         0    1.0000         0         0         0
+         0         0         0   57.2958         0         0
+         0         0         0         0   57.2958         0
+
+  Column 7
+
+         0
+         0
+         0
+         0
+         0
+
+D_long_hi =
+     0     0
+     0     0
+     0     0
+     0     0
+     0     0
+
+----- Longitudinal Low Fidelity Model Matrices -----
+A_long_lo =
+  Columns 1 through 6
+
+         0  500.0000         0 -500.0000         0         0
+         0         0         0         0    1.0000         0
+    0.0001  -32.1700   -0.0133   -7.3259   -1.1965    0.0016
+    0.0000   -0.0000   -0.0003   -0.6398    0.9378   -0.0000
+    0.0000         0   -0.0000   -1.5679   -0.8791         0
+         0         0         0         0         0   -1.0000
+         0         0         0         0         0         0
+
+  Column 7
+
+         0
+         0
+    0.0740
+   -0.0014
+   -0.1137
+         0
+  -20.2000
+
+B_long_lo =
+         0         0
+         0         0
+         0         0
+         0         0
+         0         0
+    1.0000         0
+         0   20.2000
+
+C_long_lo =
+  Columns 1 through 6
+
+    1.0000         0         0         0         0         0
+         0   57.2958         0         0         0         0
+         0         0    1.0000         0         0         0
+         0         0         0   57.2958         0         0
+         0         0         0         0   57.2958         0
+
+  Column 7
+
+         0
+         0
+         0
+         0
+         0
+
+D_long_lo =
+     0     0
+     0     0
+     0     0
+     0     0
+     0     0
+
+----- Lateral High Fidelity Model Matrices -----
+A_lat_hi =
+  Columns 1 through 6
+
+         0         0         0         0    1.0000    0.0792
+         0         0         0         0         0    1.0031
+         0         0   -0.0132   -0.2872         0         0
+    0.0641         0   -0.0000   -0.1868    0.0795   -0.9918
+         0         0    0.0000  -22.7658   -2.2365    0.5459
+         0         0   -0.0000    4.8544   -0.0418   -0.3146
+         0         0         0         0         0         0
+         0         0         0         0         0         0
+         0         0         0         0         0         0
+
+  Columns 7 through 9
+
+         0         0         0
+         0         0         0
+    0.0016         0         0
+         0    0.0002    0.0005
+         0   -0.4310    0.0812
+         0   -0.0180   -0.0404
+   -1.0000         0         0
+         0  -20.2000         0
+         0         0  -20.2000
+
+B_lat_hi =
+         0         0         0
+         0         0         0
+         0         0         0
+         0         0         0
+         0         0         0
+         0         0         0
+    1.0000         0         0
+         0   20.2000         0
+         0         0   20.2000
+
+C_lat_hi =
+  Columns 1 through 6
+
+   57.2958         0         0         0         0         0
+         0   57.2958         0         0         0         0
+         0         0    1.0000         0         0         0
+         0         0         0   57.2958         0         0
+         0         0         0         0   57.2958         0
+         0         0         0         0         0   57.2958
+
+  Columns 7 through 9
+
+         0         0         0
+         0         0         0
+         0         0         0
+         0         0         0
+         0         0         0
+         0         0         0
+
+D_lat_hi =
+     0     0     0
+     0     0     0
+     0     0     0
+     0     0     0
+     0     0     0
+     0     0     0
+
+----- Lateral Low Fidelity Model Matrices -----
+A_lat_lo =
+  Columns 1 through 6
+
+         0         0         0         0    1.0000    0.0781
+         0         0         0         0         0    1.0030
+         0         0   -0.0133    0.0000         0         0
+    0.0641         0    0.0000   -0.2022    0.0783   -0.9919
+         0         0    0.0000  -22.9219   -2.2542    0.5408
+         0         0   -0.0000    6.0052   -0.0404   -0.3146
+         0         0         0         0         0         0
+         0         0         0         0         0         0
+         0         0         0         0         0         0
+
+  Columns 7 through 9
+
+         0         0         0
+         0         0         0
+    0.0016         0         0
+         0    0.0002    0.0005
+         0   -0.4623    0.0569
+         0   -0.0244   -0.0469
+   -1.0000         0         0
+         0  -20.2000         0
+         0         0  -20.2000
+
+B_lat_lo =
+         0         0         0
+         0         0         0
+         0         0         0
+         0         0         0
+         0         0         0
+         0         0         0
+    1.0000         0         0
+         0   20.2000         0
+         0         0   20.2000
+
+C_lat_lo =
+  Columns 1 through 6
+
+   57.2958         0         0         0         0         0
+         0   57.2958         0         0         0         0
+         0         0    1.0000         0         0         0
+         0         0         0   57.2958         0         0
+         0         0         0         0   57.2958         0
+         0         0         0         0         0   57.2958
+
+  Columns 7 through 9
+
+         0         0         0
+         0         0         0
+         0         0         0
+         0         0         0
+         0         0         0
+         0         0         0
+
+D_lat_lo =
+     0     0     0
+     0     0     0
+     0     0     0
+     0     0     0
+     0     0     0
+     0     0     0

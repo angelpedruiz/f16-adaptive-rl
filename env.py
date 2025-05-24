@@ -17,17 +17,18 @@ class LinearModelF16(gym.Env):
         # TODO: Check the state and action bounds
         # x = [Δh, Δθ, Δv, Δα, Δq, Δδ_t, Δδ_e]
         # u = [Δδ_t, Δδ_e]
-        # units = [ft, rad, ft/s, rad, rad/s, rad, rad]
+        # units = [ft, deg, ft/s, deg, deg/s, deg, deg]
+        
         state_deviations = [
-            1000.0,
-            15 * np.pi / 180,
+            1500.0,
+            50,
             100.0,
-            10 * np.pi / 180,
-            1.0,
-            0.3,
             10,
+            1000,
+            200,
+            15,
         ]
-        action_deviations = [0.3, 10]
+        action_deviations = [100, 10]
         self.lower_obs_bounds = np.concatenate([np.array([-s for s in state_deviations]), np.array([0])])
         self.upper_obs_bounds = np.concatenate([np.array(state_deviations), np.array([state_deviations[4] * 2])])
         self.lower_action_bounds = np.array([-a for a in action_deviations])

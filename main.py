@@ -3,7 +3,7 @@ import gymnasium as gym
 from matplotlib import pyplot as plt
 from env import LinearModelF16
 from agent import QLearning
-from data.LinearF16SS import A, B
+from data.LinearF16SS import A_long_hi as A, B_long_hi as B
 from utils.discretizer import UniformTileCoding
 from utils.plots import reward_length_learning_error_plot
 
