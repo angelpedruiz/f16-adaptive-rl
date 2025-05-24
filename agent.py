@@ -54,11 +54,12 @@ class QLearning(Agent):
         obs = self.agent_state_space.discretize(obs)
         next_obs = self.agent_state_space.discretize(next_obs)
         action = self.agent_action_space.discretize(action)
+        flat_action = np.ravel_multi_index(action, self.agent_action_space.space.nvec)
 
         future_q_value = (not terminated) * np.max(self.q_values[next_obs])
-        td_error = reward + self.discount_factor * future_q_value - self.q_values[obs][action]
+        td_error = reward + self.discount_factor * future_q_value - self.q_values[obs][flat_action]
 
-        self.q_values[obs][action] += self.lr * td_error
+        self.q_values[obs][flat_action] += self.lr * td_error
         self.training_error.append(td_error)
 
 class ActorCritic(Agent):

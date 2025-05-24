@@ -1,6 +1,5 @@
 import numpy as np
 from gymnasium.spaces import Box, MultiDiscrete
-from gymnasium.core import ObsType
 
 class Discretizer:
     def __init__(self, space: Box):
@@ -25,4 +24,5 @@ class UniformTileCoding(Discretizer):
         continuous_values = self.lower_bounds + (indexes + 0.5) * self.bin_widths
         return tuple(continuous_values)
 
-
+#class GaussianTileCoding(Discretizer):
+    

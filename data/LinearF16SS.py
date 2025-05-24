@@ -1,6 +1,23 @@
 import numpy as np
 # State Space Representation of the F-16 Low-Fidelity Longitudinal Model Linearised around trim conditions
 
+#==========================================================
+#   Linearised Model For Longtiudinal Control High Fidelity
+#==========================================================
+# 
+#       Trim Values and Cost
+#
+# cost   = 7.1856e-06
+# thrust = 2109.4129 lb
+# elev   = -2.2441 deg
+# ail    = -0.093578 deg
+# rud    = 0.094469 deg
+# alpha  = 4.5307 deg
+# dLEF   = 6.2816 deg
+# Vel.   = 500ft/s
+# alt = 15000 ft
+# q = 0
+# ========================================================= 
 
 # State Matrix
 A = np.array([
@@ -35,3 +52,8 @@ C = np.array([
 
 # Feedforward Matrix
 D = np.zeros((5, 2))
+
+# x = [Δh, Δθ, Δv, Δα, Δq, Δδ_t, Δδ_e]
+# u = [Δδ_t, Δδ_e]
+# units = [ft, rad, ft/s, rad, rad/s, rad, rad]
+#trimmed_state = np.array([15000, ])

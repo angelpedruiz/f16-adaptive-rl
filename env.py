@@ -5,40 +5,59 @@ from typing import Optional
 
 
 class LinearModelF16(gym.Env):
-    def __init__(self, A, B, C, D, max_steps: int = 3000):
+    def __init__(self, A, B, max_steps: int = 3000):
         self.A = A
         self.B = B
-        self.C = C
-        self.D = D
         self.state_dim = A.shape[1]
         self.action_dim = B.shape[1]
-        
+
         self.max_steps = max_steps
         self.dt = 0.01
-        
-         # TODO: Define the state and action bounds
-        self.lower_state_bounds = np.array([-1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0])
-        self.upper_state_bounds = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
-        self.lower_action_bounds = np.array([-1.0, -1.0])
-        self.upper_action_bounds = np.array([1.0, 1.0])
-        
+
+        # TODO: Check the state and action bounds
+        # x = [Δh, Δθ, Δv, Δα, Δq, Δδ_t, Δδ_e]
+        # u = [Δδ_t, Δδ_e]
+        # units = [ft, rad, ft/s, rad, rad/s, rad, rad]
+        state_deviations = [
+            1000.0,
+            15 * np.pi / 180,
+            100.0,
+            10 * np.pi / 180,
+            1.0,
+            0.3,
+            10,
+        ]
+        action_deviations = [0.3, 10]
+        self.lower_obs_bounds = np.concatenate([np.array([-s for s in state_deviations]), np.array([0])])
+        self.upper_obs_bounds = np.concatenate([np.array(state_deviations), np.array([state_deviations[4] * 2])])
+        self.lower_action_bounds = np.array([-a for a in action_deviations])
+        self.upper_action_bounds = np.array(action_deviations)
+
         self.action_space = spaces.Box(
-            low=self.lower_action_bounds, high=self.upper_action_bounds, shape=(self.action_dim,), dtype=np.float64
+            low=self.lower_action_bounds,
+            high=self.upper_action_bounds,
+            shape=(self.action_dim,),
+            dtype=np.float64,
         )
         self.observation_space = spaces.Box(
-            low=self.lower_state_bounds, high=self.upper_state_bounds, dtype=np.float64
+            low=self.lower_obs_bounds, high=self.upper_obs_bounds, dtype=np.float64
         )
 
-        self.state = np.zeros(self.state_dim) 
+        self.state = np.zeros(self.state_dim)
         self.step_count = 0
 
     def _get_obs(self) -> tuple:
-        return tuple(self.state)
+        # obs: tuple(state, error)
+        ref = self.reference_signal()[0]
+        error = ref - self.state[4]
+        return tuple(np.concatenate((self.state, [error]), axis=0))
 
     def _get_info(self) -> dict:
         return {}
 
-    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> tuple:
+    def reset(
+        self, seed: Optional[int] = None, options: Optional[dict] = None
+    ) -> tuple:
         # Reset the environment to trim state
         super().reset(seed=seed)
         self.state = np.zeros(self.state_dim)
@@ -46,31 +65,57 @@ class LinearModelF16(gym.Env):
         observation = self._get_obs()
         info = self._get_info()
         return observation, info
-    
+
+    def reference_signal(self) -> np.ndarray:
+        # Sinusoidal pitch rate reference for Δq (index 4)
+        A = 0.1
+        T = 10.0
+        phi = 0.0
+
+        omega = 2 * np.pi / T
+        t = self.step_count * self.dt
+        q_ref = A * np.sin(omega * t + phi)
+        ref = np.array([q_ref])
+
+        return ref
+
     def _get_reward(self, state: np.ndarray, action: np.ndarray) -> float:
-        reward = 0 # TODO: Define reward function
+        # Reference pitch rate Δq (index 4)
+        q_ref = self.reference_signal()[0]
+        q_actual = state[4]
+        tracking_error = q_ref - q_actual
+
+        # Weighting terms (tune as needed)
+        error_weight = 10.0
+        control_weight = 0.1
+
+        # Squared tracking error and control penalty
+        reward = - (error_weight * tracking_error**2 + control_weight * np.sum(action**2))
         return reward
-     
-    
+
     def step(self, action: tuple) -> tuple:
         action = np.array(action, dtype=np.float64)
         self.state = self.state + (self.A @ self.state + self.B @ action) * self.dt
         self.step_count += 1
-        terminated = None # TODO: Define termination condition
+        # TODO: Check terminated conditions
+        terminated = (
+            True
+            if np.any(
+                np.logical_or(
+                    self.state < self.lower_obs_bounds[:-1],
+                    self.state > self.upper_obs_bounds[:-1],
+                )
+            )
+            else False
+        )
         truncated = self.step_count >= self.max_steps
         reward = self._get_reward(self.state, action)
         observation = self._get_obs()
         info = self._get_info()
-        
+
         return observation, reward, terminated, truncated, info
 
-    
-    
-    
-    
-    
-    
-        
+
 class InvertedPendulumEnv(gym.Env):
     def __init__(self, max_steps: int = 500):
         # Pendulum parameters (simplified)
@@ -104,7 +149,6 @@ class InvertedPendulumEnv(gym.Env):
 
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
         super().reset(seed=seed)
-        
 
         margin_ratio = 0.25  # 20% margin inside the bounds
         low = self.lower_state_bounds
