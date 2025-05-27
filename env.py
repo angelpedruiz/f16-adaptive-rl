@@ -19,14 +19,23 @@ class LinearModelF16(gym.Env):
         # u = [Δδ_t, Δδ_e]
         # units = [ft, deg, ft/s, deg, deg/s, deg, deg]
         
+        # state_deviations = [
+        #     1500.0,
+        #     50,
+        #     100.0,
+        #     10,
+        #     10000,
+        #     200,
+        #     15.0
+        # ] 
         state_deviations = [
-            1500.0,
-            50,
-            100.0,
-            10,
-            10000,
-            200,
-            15,
+            10000000,
+            1000,
+            1000,
+            1000,
+            1000,
+            1000,
+            1000
         ]
         action_deviations = [0.00001, 0.00001]
         self.lower_state_bounds = np.array([-s for s in state_deviations])
@@ -111,6 +120,10 @@ class LinearModelF16(gym.Env):
             )
             else False
         )
+        # if terminated print what state caused termination
+        if terminated:
+            print("Termination due to state bounds violation:", self.state)
+              
         truncated = self.step_count >= self.max_steps
         reward = self._get_reward(self.state, action)
         observation = self._get_obs()

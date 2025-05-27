@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 
 import matplotlib.pyplot as plt
 import numpy as np
+from functools import partial
 
 
 def plot_best_action(agent, state_space):
@@ -161,7 +162,7 @@ def multi_agent_reward_length_learning_error_plot(
     plt.show()
 
 
-def plot_test_episode(agent, env, n_steps=200):
+def plot_test_episode(agent, env, n_steps=200, action_signal=None):
     """
     Plots the state dimensions and actions over time for a test episode of the aircraft.
     
@@ -175,14 +176,20 @@ def plot_test_episode(agent, env, n_steps=200):
     actions = []  # List to store actions
     rewards = []  # List to store rewards
     
+    print(n_steps)
     for step in range(n_steps):
         # Get action from the agent
         discretized_obs = agent.agent_state_space.discretize(obs)
         
         # Select action (with tie-breaking for equal Q-values)
-        action = (np.random.choice(np.flatnonzero(agent.q_values[discretized_obs] == np.max(agent.q_values[discretized_obs]))),)
-        action = agent.agent_action_space.undiscretize(action)
-        
+        if action_signal is not None:
+            # If action signal is provided, use it
+            action = action_signal(step)
+        else:
+            # Otherwise, choose the best action based on Q-values
+            action = (np.random.choice(np.flatnonzero(agent.q_values[discretized_obs] == np.max(agent.q_values[discretized_obs]))),)
+            action = agent.agent_action_space.undiscretize(action)
+            
         # Take a step in the environment
         next_obs, reward, terminated, truncated, _ = env.step(action)
         
