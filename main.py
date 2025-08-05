@@ -1,22 +1,23 @@
 from tqdm import tqdm
 import gymnasium as gym
 from matplotlib import pyplot as plt
+import numpy as np
 from functools import partial
-from env import LinearModelF16
-from agent import QLearning
-from data.LinearF16SS import A_long_hi as A, B_long_hi as B
+from envs.f16_env import LinearModelF16
+from agents.base_agent import QLearning
+from data.LinearF16SS import theta_ref, state_bounds, A_long_hi_ref as A, B_long_hi as B
 from utils.discretizer import UniformTileCoding
 from utils.action import elevator_step
 from utils.plots import reward_length_learning_error_plot, plot_test_episode
 
 # hyperparameters
-learning_rate = 0.05
-n_epsiodes = 1
+learning_rate = 0.4
+n_epsiodes = 100000
 start_epsilon = 1.0
 epsilon_decay = start_epsilon / (n_epsiodes / 2)
 final_epsilon = 0.1
 
-env = LinearModelF16(A, B)
+env = LinearModelF16(A, B, max_steps=3000)
 env = gym.wrappers.RecordEpisodeStatistics(env, buffer_length=n_epsiodes)
 
 agent = QLearning(
@@ -29,7 +30,7 @@ agent = QLearning(
     obs_discretizer=UniformTileCoding(
         env.observation_space, bins=(10, 10, 10, 10, 10, 10, 10, 10)
     ),
-    action_discretizer=UniformTileCoding(env.action_space, bins=(10, 10)),
+    action_discretizer=UniformTileCoding(env.action_space, bins=(1, 10)),
 )
 
 for episode in tqdm(range(n_epsiodes)):
@@ -46,6 +47,6 @@ for episode in tqdm(range(n_epsiodes)):
 
 # plot_best_action(agent, agent.agent_state_space)
 
-input_signal = partial(elevator_step, dt=env.unwrapped.dt, step_size=-1.0, time_stamp=2.0)
-plot_test_episode(agent, env, n_steps=3000, action_signal=input_signal)
-# reward_length_learning_error_plot(env, agent, rolling_length=50)
+#input_signal = partial(elevator_step, dt=env.unwrapped.dt, step_size=40*np.pi/180, time_stamp=2.0)
+#plot_test_episode(agent, env, n_steps=3000, action_signal=input_signal)
+reward_length_learning_error_plot(env, agent, rolling_length=50)
