@@ -17,16 +17,21 @@ from envs.f16_env import LinearModelF16
 from utils.discretizer import UniformTileCoding
 from utils.plots import plot_training_milestone_from_data
 from utils.logging import setup_experiment_dir, save_run_summary
+from utils.checkpoint_utils import save_checkpoint, load_checkpoint
+
 
 # === Load config ===
 with open("config/q_learning.yaml", "r") as f:
     config = yaml.safe_load(f)
+
+checkpoint_interval = config["training"].get("checkpoint_interval", 1000)
 
 # === Setup experiment folder ===
 exp_dir = setup_experiment_dir(config, algo_name="q_learning")
 
 # === Set random seed for reproducibility ===
 np.random.seed(config["training"]["seed"])
+
 
 # === Create Environment ===
 env = LinearModelF16(
@@ -63,21 +68,49 @@ agent = QLearning(
 
 start_time = time.time()
 
+RESUME_FROM = config["training"].get("resume_from", None)
+
+
+if RESUME_FROM:
+    ckpt = load_checkpoint(Path(RESUME_FROM))
+    agent.load_brain(ckpt["agent_brain"])
+    env.return_queue = ckpt["returns"].tolist()
+    env.length_queue = ckpt["lengths"].tolist()
+    start_episode = ckpt["episode"] + 1
+
+
 # === Training Loop ===
 total_eps = config["training"]["episodes"]
-milestones = [min(int(frac * total_eps), total_eps - 1) for frac in config["training"]["milestones_fractions"]]
+milestones = [
+    min(int(frac * total_eps), total_eps - 1)
+    for frac in config["training"]["milestones_fractions"]
+]
 
+if not RESUME_FROM:
+    start_episode = 0
 
-for episode in tqdm(range(total_eps)):
+for episode in tqdm(range(start_episode, total_eps)):
     obs, info = env.reset()
     done = False
 
+    # Save a checkpoint every N episodes
+    if episode % checkpoint_interval == 0:
+        checkpoint_dir = exp_dir / f"checkpoint_ep{episode}"
+        save_checkpoint(
+            agent=agent,
+            current_episode=episode,
+            return_queue=env.return_queue,
+            length_queue=env.length_queue,
+            config=config,
+            checkpoint_dir=checkpoint_dir,
+        )
+
+    # Record Snapshot Epsiode Evolution
     record_episode = episode in milestones
     if record_episode:
         state_trace = []
         action_trace = []
         reward_trace = []
-        # Record initial state from reset info
         state_trace.append(np.copy(info["state"]))
         reference_trace = [np.copy(info["reference"])]
         error_trace = [np.copy(info["tracking_error"])]
@@ -115,11 +148,22 @@ for episode in tqdm(range(total_eps)):
             tracked_indices=list(config["env"]["reference_config"].keys()),
         )
 
-        
+
 # === Save metrics for post-training analysis ===
 np.save(exp_dir / "returns.npy", np.array(env.return_queue))
 np.save(exp_dir / "lengths.npy", np.array(env.length_queue))
 np.save(exp_dir / "training_error.npy", np.array(agent.training_error))
+
+final_ckpt_dir = exp_dir / f"checkpoint_final"
+save_checkpoint(
+    agent=agent,
+    current_episode=total_eps - 1,
+    return_queue=env.return_queue,
+    length_queue=env.length_queue,
+    config=config,
+    checkpoint_dir=final_ckpt_dir,
+)
+
 
 # === Final Report ===
 training_time = time.time() - start_time

@@ -43,6 +43,8 @@ training:
     - 0.9
     - 1.0
   rolling_length: 50
+  checkpoint_interval: 100
+  resume_from: null  # Or: experiments/q_learning/run_20250805_192300/checkpoint_ep200/checkpoint_ep200.json
   
 
 eval:
