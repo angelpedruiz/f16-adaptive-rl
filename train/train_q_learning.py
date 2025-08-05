@@ -26,8 +26,7 @@ with open("config/q_learning.yaml", "r") as f:
 
 checkpoint_interval = config["training"].get("checkpoint_interval", 1000)
 
-# === Setup experiment folder ===
-exp_dir = setup_experiment_dir(config, algo_name="q_learning")
+
 
 # === Set random seed for reproducibility ===
 np.random.seed(config["training"]["seed"])
@@ -68,33 +67,44 @@ agent = QLearning(
 
 start_time = time.time()
 
+# === Setup experiment folder ===
 RESUME_FROM = config["training"].get("resume_from", None)
 
 
+
+
 if RESUME_FROM:
-    ckpt = load_checkpoint(Path(RESUME_FROM))
+    ckpt_path = Path(RESUME_FROM).resolve()
+    exp_dir = ckpt_path.parent.parent  # checkpoint_epXXX → run_xxxxxx
+    ckpt = load_checkpoint(ckpt_path)
     agent.load_brain(ckpt["agent_brain"])
+    agent.obs_discretizer.set_params(ckpt["obs_discretizer"])
+    agent.action_discretizer.set_params(ckpt["action_discretizer"])
     env.return_queue = ckpt["returns"].tolist()
     env.length_queue = ckpt["lengths"].tolist()
     start_episode = ckpt["episode"] + 1
+    print(f"Resuming training from {RESUME_FROM} in existing directory {exp_dir}")
+    total_eps = config["training"]["episodes"] + start_episode
+else:
+    exp_dir = setup_experiment_dir(config, algo_name="q_learning")
+    start_episode = 0
+    total_eps = config["training"]["episodes"]
+
 
 
 # === Training Loop ===
-total_eps = config["training"]["episodes"]
 milestones = [
     min(int(frac * total_eps), total_eps - 1)
     for frac in config["training"]["milestones_fractions"]
 ]
 
-if not RESUME_FROM:
-    start_episode = 0
 
 for episode in tqdm(range(start_episode, total_eps)):
     obs, info = env.reset()
     done = False
 
     # Save a checkpoint every N episodes
-    if episode % checkpoint_interval == 0:
+    if episode != 0 and episode % checkpoint_interval == 0:
         checkpoint_dir = exp_dir / f"checkpoint_ep{episode}"
         save_checkpoint(
             agent=agent,
@@ -154,7 +164,8 @@ np.save(exp_dir / "returns.npy", np.array(env.return_queue))
 np.save(exp_dir / "lengths.npy", np.array(env.length_queue))
 np.save(exp_dir / "training_error.npy", np.array(agent.training_error))
 
-final_ckpt_dir = exp_dir / f"checkpoint_final"
+# === Final Checkpoint ===
+final_ckpt_dir = exp_dir / f"checkpoint_final_ep{total_eps - 1}"
 save_checkpoint(
     agent=agent,
     current_episode=total_eps - 1,
@@ -167,6 +178,6 @@ save_checkpoint(
 
 # === Final Report ===
 training_time = time.time() - start_time
-save_run_summary(exp_dir, config, agent, env, training_time_sec=training_time)
+save_run_summary(exp_dir, config, agent, env, training_time_sec=training_time, start_episode=start_episode, total_eps=total_eps)
 
 print(f"\nTraining complete. Results saved to: {exp_dir}")

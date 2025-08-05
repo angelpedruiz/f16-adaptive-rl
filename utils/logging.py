@@ -5,6 +5,7 @@ import datetime
 import numpy as np
 import time
 
+
 def setup_experiment_dir(config, algo_name):
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     exp_dir = Path(f"experiments/{algo_name}/run_{timestamp}")
@@ -13,12 +14,26 @@ def setup_experiment_dir(config, algo_name):
         yaml.dump(config, f)
     return exp_dir
 
-def save_run_summary(exp_dir, config, agent, env, training_time_sec=None):
+
+def save_run_summary(
+    exp_dir,
+    config,
+    agent,
+    env,
+    training_time_sec=None,
+    start_episode=None,
+    total_eps=None,
+):
+    summary_path = exp_dir / "summary.json"
+
     rewards = np.array(env.return_queue)
     lengths = np.array(env.length_queue)
 
-    summary = {
+    sprint_summary = {
+        "sprint_id": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
         "episodes": config["training"]["episodes"],
+        "start_episode": start_episode,
+        "end_episode": (total_eps - 1) if total_eps is not None else None,
         "final_epsilon_value": agent.epsilon,
         "avg_reward": float(np.mean(rewards)),
         "max_reward": float(np.max(rewards)),
@@ -28,9 +43,9 @@ def save_run_summary(exp_dir, config, agent, env, training_time_sec=None):
     }
 
     if training_time_sec is not None:
-        summary["training_time_sec"] = round(training_time_sec, 2)
+        sprint_summary["training_time_sec"] = round(training_time_sec, 2)
 
-    # Log relevant agent hyperparameters
+    # Agent hyperparameters
     agent_params = {}
     for attr in dir(agent):
         if not attr.startswith("_") and not callable(getattr(agent, attr)):
@@ -38,10 +53,20 @@ def save_run_summary(exp_dir, config, agent, env, training_time_sec=None):
             if isinstance(value, (int, float, str, bool)):
                 agent_params[attr] = value
 
-    summary["agent_hyperparameters"] = agent_params
+    sprint_summary["agent_hyperparameters"] = agent_params
 
-    with open(exp_dir / "summary.json", "w") as f:
-        json.dump(summary, f, indent=2)
+    # Load existing summaries (if any)
+    if summary_path.exists():
+        with open(summary_path, "r") as f:
+            summary_list = json.load(f)
+    else:
+        summary_list = []
+
+    summary_list.append(sprint_summary)
+
+    with open(summary_path, "w") as f:
+        json.dump(summary_list, f, indent=2)
+
 
 def load_metrics(exp_dir):
     returns = np.load(exp_dir / "returns.npy")

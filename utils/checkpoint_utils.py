@@ -2,6 +2,7 @@ import json
 import os
 import yaml
 import numpy as np
+import math
 from pathlib import Path
 
 
@@ -40,6 +41,20 @@ def save_checkpoint(
         checkpoint_dir (Path): Directory where checkpoint files will be saved
         filename (str, optional): JSON filename. Defaults to "checkpoint_ep{current_episode}.json"
     """
+    def make_json_serializable(obj):
+        if isinstance(obj, dict):
+            return {str(k): make_json_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, np.ndarray):
+            return make_json_serializable(obj.tolist())
+        elif isinstance(obj, (list, tuple)):
+            return [make_json_serializable(x) for x in obj]
+        elif isinstance(obj, float):
+            if math.isnan(obj) or math.isinf(obj):
+                return None  # Or 0.0 if you prefer
+            return obj
+        else:
+            return obj
+
 
     # Create folder if it doesn't exist
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -47,17 +62,16 @@ def save_checkpoint(
     if filename is None:
         filename = f"checkpoint_ep{current_episode}.json"
 
-    agent_brain = agent.get_brain()
+    agent_brain = make_json_serializable(agent.get_brain())
+    agent_brain["obs_discretizer"] = agent.obs_discretizer.get_params()
+    agent_brain["action_discretizer"] = agent.action_discretizer.get_params()
+
 
     # Prepare brain dict for JSON serialization
-    brain_serializable = {}
-    for k, v in agent_brain.items():
-        if isinstance(v, dict):
-            brain_serializable[k] = {str(key): val for key, val in v.items()}
-        elif isinstance(v, (np.ndarray, list)):
-            brain_serializable[k] = np.array(v).tolist()
-        else:
-            brain_serializable[k] = v
+    brain_serializable = make_json_serializable(agent_brain)
+    
+
+
 
     # Save agent brain JSON
     with open(checkpoint_dir / filename, "w") as f:
@@ -67,7 +81,7 @@ def save_checkpoint(
                 "episode": current_episode,
             },
             f,
-            indent=4,
+            indent=4, allow_nan=False
         )
     print(f"Agent brain saved to {checkpoint_dir / filename}")
 
@@ -108,6 +122,9 @@ def load_checkpoint(checkpoint_file: Path):
 
     raw_brain = checkpoint["agent_brain"]
     restored_brain = {}
+    obs_discretizer_params = raw_brain.get("obs_discretizer")
+    action_discretizer_params = raw_brain.get("action_discretizer")
+
 
     for k, v in raw_brain.items():
         if k == "q_values" and isinstance(v, dict):
@@ -134,4 +151,7 @@ def load_checkpoint(checkpoint_file: Path):
         "returns": returns,
         "lengths": lengths,
         "training_error": training_error,
+        "obs_discretizer": obs_discretizer_params,
+        "action_discretizer": action_discretizer_params,
     }
+

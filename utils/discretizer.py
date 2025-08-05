@@ -42,4 +42,25 @@ class UniformTileCoding(Discretizer):
         values = self.lower_bounds + (indexes + 0.5) * self.bin_widths
         values[self.fixed_dims] = self.lower_bounds[self.fixed_dims]
         return tuple(values)
+    
+    def get_params(self):
+        return {
+            "bins": self.bins.tolist(),
+            "low": self.lower_bounds.tolist(),
+            "high": self.upper_bounds.tolist()
+        }
+
+    def set_params(self, params):
+        self.bins = np.array(params["bins"])
+        self.lower_bounds = np.array(params["low"])
+        self.upper_bounds = np.array(params["high"])
+        self.fixed_dims = self.bins == 1
+
+        self.bin_widths = np.empty_like(self.lower_bounds)
+        self.bin_widths[~self.fixed_dims] = (
+            self.upper_bounds[~self.fixed_dims] - self.lower_bounds[~self.fixed_dims]
+        ) / self.bins[~self.fixed_dims]
+        self.bin_widths[self.fixed_dims] = 1.0
+        self.space = MultiDiscrete(self.bins)
+
 

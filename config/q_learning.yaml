@@ -37,14 +37,16 @@ training:
   episodes: 10
   seed: 42
   milestones_fractions:
-    - 0.0
-    - 0.5
-    - 0.75
-    - 0.9
+ 
+    # - 0.0
+    # - 0.5
+    # - 0.75
+    # - 0.9
     - 1.0
   rolling_length: 50
   checkpoint_interval: 100
-  resume_from: null  # Or: experiments/q_learning/run_20250805_192300/checkpoint_ep200/checkpoint_ep200.json
+  #resume_from: null  # Or: experiments/q_learning/run_20250805_192300/checkpoint_ep200/checkpoint_ep200.json
+  resume_from: experiments/q_learning/run_20250805_222448/checkpoint_final_ep39/checkpoint_ep39.json
   
 
 eval:

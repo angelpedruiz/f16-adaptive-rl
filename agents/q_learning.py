@@ -1,5 +1,6 @@
 from agents.base_agent import Agent
 import numpy as np
+from collections import defaultdict
 
 
 class QLearning(Agent):
@@ -11,15 +12,15 @@ class QLearning(Agent):
         terminated: bool,
         next_obs: tuple,
     ):
-        obs = self.agent_obs_space.discretize(obs)
-        next_obs = self.agent_obs_space.discretize(next_obs)
-        action = self.agent_action_space.discretize(action)
+        obs = self.obs_discretizer.discretize(obs)
+        next_obs = self.obs_discretizer.discretize(next_obs)
+        action = self.action_discretizer.discretize(action)
         assert all(
-            0 <= a < n for a, n in zip(action, self.agent_action_space.space.nvec)
+            0 <= a < n for a, n in zip(action, self.action_discretizer.space.nvec)
         ), (
-            f"Discretized action {action} out of bounds for nvec {self.agent_action_space.space.nvec}"
+            f"Discretized action {action} out of bounds for nvec {self.action_discretizer.space.nvec}"
         )
-        flat_action = np.ravel_multi_index(action, self.agent_action_space.space.nvec)
+        flat_action = np.ravel_multi_index(action, self.action_discretizer.space.nvec)
 
         future_q_value = (not terminated) * np.max(self.q_values[next_obs])
         td_error = (
@@ -44,7 +45,11 @@ class QLearning(Agent):
         }
         
     def load_brain(self, brain_dict):
-        self.q_values = brain_dict["q_values"]
+        loaded_q = brain_dict["q_values"]
+        # Convert keys to tuples if they were stringified (if needed)
+        converted_q = {eval(k) if isinstance(k, str) else k: np.array(v) for k, v in loaded_q.items()}
+        self.q_values = defaultdict(lambda: np.zeros(self.num_actions), converted_q)
+        
         self.lr = brain_dict["learning_rate"]
         self.discount_factor = brain_dict["discount_factor"]
         self.epsilon = brain_dict["epsilon"]

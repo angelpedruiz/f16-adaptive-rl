@@ -16,44 +16,37 @@ class Agent:
         discount_factor: float,
         obs_discretizer=None,
         action_discretizer=None,
-        brain_state: dict = None,
     ):
         self.env = env
-        self.agent_obs_space = obs_discretizer
+        self.obs_discretizer = obs_discretizer
         if action_discretizer is None:
-            self.agent_action_space = env.action_space
+            self.action_discretizer = env.action_space
             self.num_actions = env.action_space.n
         else:
-            self.agent_action_space = action_discretizer
-            self.num_actions = np.prod(self.agent_action_space.space.nvec)
+            self.action_discretizer = action_discretizer
+            self.num_actions = np.prod(self.action_discretizer.space.nvec)
 
-        if brain_state:
-            self.q_values = brain_state.get("q_values", defaultdict(lambda: np.zeros(self.num_actions)))
-            self.lr = brain_state.get("learning_rate", learning_rate)
-            self.discount_factor = brain_state.get("discount_factor", discount_factor)
-            self.epsilon = brain_state.get("epsilon", initial_epsilon)
-            self.training_error = brain_state.get("training_error", [])
-        else:
-            self.q_values = defaultdict(lambda: np.zeros(self.num_actions))
-            self.lr = learning_rate
-            self.discount_factor = discount_factor
-            self.epsilon = initial_epsilon
-            self.training_error = []
+        
+        self.q_values = defaultdict(lambda: np.zeros(self.num_actions))
+        self.lr = learning_rate
+        self.discount_factor = discount_factor
+        self.epsilon = initial_epsilon
+        self.training_error = []
 
         self.epsilon_decay = epsilon_decay
         self.final_epsilon = final_epsilon
 
     def get_action(self, obs: tuple) -> tuple:
-        discretized_obs = self.agent_obs_space.discretize(obs)
+        discretized_obs = self.obs_discretizer.discretize(obs)
 
         if np.random.rand() < self.epsilon:
-            action = tuple(self.agent_action_space.space.sample())
+            action = tuple(self.action_discretizer.space.sample())
         else:
             q_vals = self.q_values[discretized_obs]
             best_actions = np.flatnonzero(q_vals == q_vals.max())
             action = (np.random.choice(best_actions),)
 
-        undiscretized_action = self.agent_action_space.undiscretize(action)
+        undiscretized_action = self.action_discretizer.undiscretize(action)
         return undiscretized_action
 
     def decay_epsilon(self):
