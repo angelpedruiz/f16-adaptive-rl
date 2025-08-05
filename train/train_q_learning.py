@@ -82,6 +82,7 @@ for episode in tqdm(range(total_eps)):
         reference_trace = [np.copy(info["reference"])]
         error_trace = [np.copy(info["tracking_error"])]
 
+    # === Run episode ===
     while not done:
         action = agent.get_action(obs)
         next_obs, reward, terminated, truncated, info = env.step(action)
@@ -99,6 +100,7 @@ for episode in tqdm(range(total_eps)):
         done = terminated or truncated
 
     agent.decay_epsilon()
+    # =========================
 
     if record_episode:
         milestone_path = exp_dir / f"state_action_evolution_ep{episode + 1}.png"

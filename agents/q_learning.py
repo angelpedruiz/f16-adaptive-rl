@@ -30,3 +30,23 @@ class QLearning(Agent):
 
         self.q_values[obs][flat_action] += self.lr * td_error
         self.training_error.append(td_error)
+        
+    def get_brain(self):
+        """
+        Returns agents brain as a dictionary.
+        """
+        return {
+            "q_values": self.q_values,
+            "learning_rate": self.lr,
+            "discount_factor": self.discount_factor,
+            "epsilon": self.epsilon,
+            "training_error": self.training_error
+        }
+        
+    def load_brain(self, brain_dict):
+        self.q_values = brain_dict["q_values"]
+        self.lr = brain_dict["learning_rate"]
+        self.discount_factor = brain_dict["discount_factor"]
+        self.epsilon = brain_dict["epsilon"]
+        self.training_error = brain_dict["training_error"]
+
