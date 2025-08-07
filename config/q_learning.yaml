@@ -3,9 +3,9 @@ agent:
   learning_rate: 0.1
   epsilon:
     start: 1.0
-    decay: 0.002
+    decay: 0.00002
     final: 0.05
-  discount_factor: 0.95
+  discount_factor: 0.99
   obs_bins: [20, 20]
   action_bins: [1, 20]
 
@@ -34,21 +34,29 @@ env:
   action_high: [0, 27]
 
 training:
-  episodes: 10
+  episodes: 100
   seed: 42
   milestones_fractions:
  
     # - 0.0
-    # - 0.5
+    - 0.5
     # - 0.75
-    # - 0.9
+    - 0.9
     - 1.0
   rolling_length: 50
-  checkpoint_interval: 100
+  checkpoint_interval: 10000
   #resume_from: null  # Or: experiments/q_learning/run_20250805_192300/checkpoint_ep200/checkpoint_ep200.json
-  resume_from: experiments/q_learning/run_20250805_222448/checkpoint_final_ep39/checkpoint_ep39.json
+  resume_from: experiments/q_learning/run_20250805_232035/checkpoint_ep60000/checkpoint_ep60000.json
   
 
 eval:
-  input_signal: step
-  test_steps: 3000
+  rolling_length: 50
+  convergence_threshold: 0.05
+  last_n: 50 #Number of final episodes to compute average and stability.
+  settling_tolerance: 0.05
+  settling_duration: 100 # Number of steps to consider for settling duration.
+
+
+
+  # input_signal: step
+  # test_steps: 3000

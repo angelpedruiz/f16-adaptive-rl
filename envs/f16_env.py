@@ -180,22 +180,31 @@ class LinearModelF16(gym.Env):
         """
         ref = self._get_reference()
         
-        # Compute tracking errors only for states with references
         if len(self.reference_config) > 0:
             tracking_indices = list(self.reference_config.keys())
             tracking_error = ref[tracking_indices] - state[tracking_indices]
-            error_weight = 1.0
-            reward = -error_weight * np.sum(tracking_error**2)
+            squared_error = np.sum(tracking_error**2)
+
+            # Define max allowable error, based on observation bounds of tracked states
+            # You can tune this or use max difference from observation bounds per tracked index
+            Emax = 0
+            for idx in tracking_indices:
+                Emax += (self.obs_high[idx] - self.obs_low[idx])**2
+
+            # Shifted reward clipped at 0
+            reward = max(0.0, Emax - squared_error)
         else:
+            # No reference config means no tracking; reward zero
             reward = 0.0
 
         # Penalties for early termination
         if terminated:
-            reward -= 100000.0
+            reward -= 1000.0
         if truncated:
             reward += 0.0  # No penalty for reaching max steps
-            
+
         return float(reward)
+
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
         """
