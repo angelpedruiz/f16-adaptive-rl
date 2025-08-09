@@ -1,7 +1,8 @@
 from agents.base_agent import Agent
 import numpy as np
 from collections import defaultdict
-
+from functools import partial
+from utils.checkpoint_utils import safe_eval_key  # Import the safe evaluation function
 
 class QLearning(Agent):
     def update(
@@ -31,27 +32,39 @@ class QLearning(Agent):
 
         self.q_values[obs][flat_action] += self.lr * td_error
         self.training_error.append(td_error)
-        
+
     def get_brain(self):
         """
-        Returns agents brain as a dictionary.
+        Returns agent's brain as a dictionary for serialization.
         """
+        # Convert keys to strings for serialization
+        serializable_q = {str(k): v for k, v in self.q_values.items()}
         return {
-            "q_values": self.q_values,
+            "q_values": serializable_q,
             "learning_rate": self.lr,
             "discount_factor": self.discount_factor,
             "epsilon": self.epsilon,
-            "training_error": self.training_error
+            "training_error": self.training_error,
         }
-        
+
     def load_brain(self, brain_dict):
+        """
+        Load agent's brain from a dictionary.
+        """
         loaded_q = brain_dict["q_values"]
-        # Convert keys to tuples if they were stringified (if needed)
-        converted_q = {eval(k) if isinstance(k, str) else k: np.array(v) for k, v in loaded_q.items()}
-        self.q_values = defaultdict(lambda: np.zeros(self.num_actions), converted_q)
-        
+
+        # ✅ Safely convert keys from stringified tuples back to real tuples
+        restored_q = {
+            safe_eval_key(k): np.array(v) if not isinstance(v, np.ndarray) else v
+            for k, v in loaded_q.items()
+        }
+
+        # ✅ Restore with picklable default factory
+        self.q_values = defaultdict(
+            partial(np.zeros, self.num_actions), restored_q
+        )
+
         self.lr = brain_dict["learning_rate"]
         self.discount_factor = brain_dict["discount_factor"]
         self.epsilon = brain_dict["epsilon"]
         self.training_error = brain_dict["training_error"]
-

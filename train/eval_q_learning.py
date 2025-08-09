@@ -50,7 +50,7 @@ if __name__ == "__main__":
         window=eval_window,
         last_n=last_n,
         settling_tolerance=settling_tolerance,
-        settling_duration=settling_duration
+        settling_duration=settling_duration,
     )
 
     # === Save training metrics to JSON ===
@@ -58,9 +58,6 @@ if __name__ == "__main__":
     with open(metrics_path, "w") as f:
         json.dump(training_metrics, f, indent=4)
     print(f"✅ Saved training metrics to {metrics_path}")
-
-    # === Prompt for rolling window (optional) ===
-    rolling_length = eval_window
 
     # === Dummy wrappers to reuse plotting function ===
     class DummyEnv:
@@ -71,11 +68,12 @@ if __name__ == "__main__":
         training_error = training_error
 
     # === Plot the results ===
+    rolling_length = eval_window
     plot_path = exp_dir / f"training_summary_rl{rolling_length}.png"
     reward_length_learning_error_plot(
         env=DummyEnv(),
         agent=DummyAgent(),
         rolling_length=rolling_length,
-        save_path=plot_path
+        save_path=plot_path,
     )
     print(f"✅ Saved training plot to {plot_path}")

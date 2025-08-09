@@ -12,7 +12,7 @@ agent:
 env:
   max_steps: 2000
   dt: 0.01
-  state_indices_to_keep: [1] # Keep only the relevant states for observation
+  state_indices_to_keep: [4] # Keep only the relevant states for observation
   reference_config:
     1:
       type: sin 
@@ -26,37 +26,35 @@ env:
   # Observation space bounds (must match state_indices_to_keep length + errors(ordered))
   #obs_low: [-1.396, -1.215, -2.0, -22.5, -2.0]
   #obs_high: [1.396, 1.205, 2.0, 27.0, 2.0]
-  obs_low: [-1.05, -2.5]
-  obs_high: [1.05, 2.5]
+  obs_low: [-1.5, -2.5]
+  obs_high: [1.5, 2.5]
 
   # Action space bounds
   action_low: [0, -22.5]
   action_high: [0, 27]
 
-training:
-  episodes: 100
+training: 
+  episodes: 50100
   seed: 42
   milestones_fractions:
  
-    # - 0.0
+    - 0.1
     - 0.5
-    # - 0.75
-    - 0.9
+    - 0.75
+    - 0.95
     - 1.0
-  rolling_length: 50
   checkpoint_interval: 10000
-  #resume_from: null  # Or: experiments/q_learning/run_20250805_192300/checkpoint_ep200/checkpoint_ep200.json
-  resume_from: experiments/q_learning/run_20250805_232035/checkpoint_ep60000/checkpoint_ep60000.json
+  #resume_from: null  
+  resume_from: experiments\q_learning\run_20250807_194916\checkpoint_final_ep10000\checkpoint_ep9999_brain.npz # null OR .npz file path
   
 
 eval:
-  rolling_length: 50
+  rolling_length: 1000
   convergence_threshold: 0.05
   last_n: 50 #Number of final episodes to compute average and stability.
   settling_tolerance: 0.05
   settling_duration: 100 # Number of steps to consider for settling duration.
 
+test:
+  checkpoint_path: experiments\q_learning\pitch_rate_and_theta_error_obs\checkpoint_final_ep60100\checkpoint_ep60099_brain.npz # .npz file
 
-
-  # input_signal: step
-  # test_steps: 3000

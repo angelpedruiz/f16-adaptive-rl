@@ -1,19 +1,11 @@
-import json
-import os
-import yaml
-import numpy as np
-import math
-from pathlib import Path
-
-
-import json
 import yaml
 import numpy as np
 from pathlib import Path
+import ast  # ✅ Safe parsing
 
 """
 Utility functions to save and load RL training checkpoints, including:
-- Agent brain state (JSON)
+- Agent brain state (NPZ)
 - Episode metrics (NPY)
 - Training config (YAML)
 """
@@ -29,129 +21,84 @@ def save_checkpoint(
     filename: str = None,
 ):
     """
-    Save checkpoint with agent brain (JSON), returns, lengths, training error (.npy),
-    and configuration (YAML) inside a checkpoint folder.
-
-    Args:
-        agent (object): Agent instance with a get_brain() method
-        current_episode (int): Current episode number
-        return_queue (list): Episode returns from environment
-        length_queue (list): Episode lengths from environment
-        config (dict): Full training configuration to save for documentation
-        checkpoint_dir (Path): Directory where checkpoint files will be saved
-        filename (str, optional): JSON filename. Defaults to "checkpoint_ep{current_episode}.json"
+    Saves agent brain, metrics, and config to disk.
     """
-    def make_json_serializable(obj):
-        if isinstance(obj, dict):
-            return {str(k): make_json_serializable(v) for k, v in obj.items()}
-        elif isinstance(obj, np.ndarray):
-            return make_json_serializable(obj.tolist())
-        elif isinstance(obj, (list, tuple)):
-            return [make_json_serializable(x) for x in obj]
-        elif isinstance(obj, float):
-            if math.isnan(obj) or math.isinf(obj):
-                return None  # Or 0.0 if you prefer
-            return obj
-        else:
-            return obj
-
-
-    # Create folder if it doesn't exist
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     if filename is None:
-        filename = f"checkpoint_ep{current_episode}.json"
+        filename = f"checkpoint_ep{current_episode}"
 
-    agent_brain = make_json_serializable(agent.get_brain())
-    agent_brain["obs_discretizer"] = agent.obs_discretizer.get_params()
-    agent_brain["action_discretizer"] = agent.action_discretizer.get_params()
+    # === Save agent brain ===
+    brain = agent.get_brain()
+    brain["obs_discretizer"] = agent.obs_discretizer.get_params()
+    brain["action_discretizer"] = agent.action_discretizer.get_params()
+    brain["episode"] = current_episode
 
+    # Save as npz (auto-pickles complex Python objects like dict, lists, etc.)
+    np.savez_compressed(checkpoint_dir / f"{filename}_brain.npz", **brain)
+    print(f"🧠 Agent brain saved to {checkpoint_dir / f'{filename}_brain.npz'}")
 
-    # Prepare brain dict for JSON serialization
-    brain_serializable = make_json_serializable(agent_brain)
-    
-
-
-
-    # Save agent brain JSON
-    with open(checkpoint_dir / filename, "w") as f:
-        json.dump(
-            {
-                "agent_brain": brain_serializable,
-                "episode": current_episode,
-            },
-            f,
-            indent=4, allow_nan=False
-        )
-    print(f"Agent brain saved to {checkpoint_dir / filename}")
-
-    # Save metrics as .npy
+    # === Save metrics ===
     np.save(checkpoint_dir / "returns.npy", np.array(return_queue))
     np.save(checkpoint_dir / "lengths.npy", np.array(length_queue))
-    np.save(
-        checkpoint_dir / "training_error.npy", np.array(agent_brain["training_error"])
-    )
-    print(f"Metrics saved to {checkpoint_dir} as .npy files")
+    np.save(checkpoint_dir / "training_error.npy", np.array(brain["training_error"]))
+    print(f"📈 Metrics saved to {checkpoint_dir}")
 
-    # Save training config
+    # === Save config ===
     with open(checkpoint_dir / "config.yaml", "w") as f:
         yaml.dump(config, f, default_flow_style=False)
-    print(f"Training config saved to {checkpoint_dir / 'config.yaml'}")
+    print(f"⚙️  Training config saved to {checkpoint_dir / 'config.yaml'}")
+    
+def safe_eval_key(k):
+    if isinstance(k, str):
+        try:
+            return ast.literal_eval(k)
+        except (SyntaxError, ValueError):
+            return k
+    return k
 
 
 def load_checkpoint(checkpoint_file: Path):
     """
-    Load agent brain and training state from a checkpoint JSON file,
-    and load metrics from .npy files in the same folder.
+    Loads agent brain, metrics, and config from disk.
 
     Args:
-        checkpoint_file (Path): Path to the checkpoint JSON file
+        checkpoint_file (Path): Path to the .npz file (e.g., "checkpoint_epXX_brain.npz")
 
     Returns:
-        dict: {
-            "agent_brain": dict with keys (e.g. q_values, epsilon, etc.),
-            "episode": int,
-            "returns": np.ndarray,
-            "lengths": np.ndarray,
-            "training_error": np.ndarray
-        }
+        dict: Contains agent_brain, metrics, and discretizer configs
     """
-    # === Load JSON ===
-    with open(checkpoint_file, "r") as f:
-        checkpoint = json.load(f)
-
-    raw_brain = checkpoint["agent_brain"]
-    restored_brain = {}
-    obs_discretizer_params = raw_brain.get("obs_discretizer")
-    action_discretizer_params = raw_brain.get("action_discretizer")
-
-
-    for k, v in raw_brain.items():
-        if k == "q_values" and isinstance(v, dict):
-            q_values_restored = {}
-            for key_str, value in v.items():
-                try:
-                    key = eval(key_str)  # careful! only use if you trust the file
-                except Exception:
-                    key = key_str
-                q_values_restored[key] = value
-            restored_brain[k] = q_values_restored
-        else:
-            restored_brain[k] = v
-
-    # === Load npy files from same directory ===
     checkpoint_dir = checkpoint_file.parent
+
+    # === Load agent brain ===
+    npz_data = np.load(checkpoint_file, allow_pickle=True)
+    agent_brain = {
+        k: v.tolist() if isinstance(v, np.ndarray) and v.dtype == object else v
+        for k, v in npz_data.items()
+    }
+
+    # Safely convert stringified Q-table keys back to tuples (if needed)
+    if "q_values" in agent_brain and isinstance(agent_brain["q_values"], dict):
+        restored_q = {}
+        for k, v in agent_brain["q_values"].items():
+            try:
+                key = ast.literal_eval(k) if isinstance(k, str) else k
+            except Exception:
+                key = k  # fallback: keep as string
+            restored_q[key] = v
+        agent_brain["q_values"] = restored_q
+
+    # === Load metrics ===
     returns = np.load(checkpoint_dir / "returns.npy")
     lengths = np.load(checkpoint_dir / "lengths.npy")
     training_error = np.load(checkpoint_dir / "training_error.npy")
 
     return {
-        "agent_brain": restored_brain,
-        "episode": checkpoint["episode"],
+        "agent_brain": agent_brain,
+        "episode": agent_brain.get("episode", -1),
         "returns": returns,
         "lengths": lengths,
         "training_error": training_error,
-        "obs_discretizer": obs_discretizer_params,
-        "action_discretizer": action_discretizer_params,
+        "obs_discretizer": agent_brain.get("obs_discretizer"),
+        "action_discretizer": agent_brain.get("action_discretizer"),
     }
-

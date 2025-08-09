@@ -80,6 +80,7 @@ if RESUME_FROM:
     agent.load_brain(ckpt["agent_brain"])
     agent.obs_discretizer.set_params(ckpt["obs_discretizer"])
     agent.action_discretizer.set_params(ckpt["action_discretizer"])
+    agent.training_error = ckpt["training_error"].tolist() # NEW  LINE CHECK FOR BUG
     env.return_queue = ckpt["returns"].tolist()
     env.length_queue = ckpt["lengths"].tolist()
     start_episode = ckpt["episode"] + 1
@@ -104,7 +105,7 @@ for episode in tqdm(range(start_episode, total_eps)):
     done = False
 
     # Save a checkpoint every N episodes
-    if episode != 0 and episode % checkpoint_interval == 0:
+    if checkpoint_interval > 0 and episode != 0 and episode % checkpoint_interval == 0:
         checkpoint_dir = exp_dir / f"checkpoint_ep{episode}"
         save_checkpoint(
             agent=agent,
@@ -165,7 +166,7 @@ np.save(exp_dir / "lengths.npy", np.array(env.length_queue))
 np.save(exp_dir / "training_error.npy", np.array(agent.training_error))
 
 # === Final Checkpoint ===
-final_ckpt_dir = exp_dir / f"checkpoint_final_ep{total_eps - 1}"
+final_ckpt_dir = exp_dir / f"checkpoint_final_ep{total_eps}"
 save_checkpoint(
     agent=agent,
     current_episode=total_eps - 1,
