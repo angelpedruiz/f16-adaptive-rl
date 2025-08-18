@@ -29,9 +29,13 @@ class LinearModelF16(gym.Env):
 
         # Convert bounds to numpy arrays with proper validation
         if obs_low is None:
-            obs_low = [-np.inf] * len(state_indices_for_obs or list(range(self.state_dim)))
+            obs_low = [-np.inf] * len(
+                state_indices_for_obs or list(range(self.state_dim))
+            )
         if obs_high is None:
-            obs_high = [np.inf] * len(state_indices_for_obs or list(range(self.state_dim)))
+            obs_high = [np.inf] * len(
+                state_indices_for_obs or list(range(self.state_dim))
+            )
         if action_low is None:
             action_low = [-np.inf] * self.action_dim
         if action_high is None:
@@ -49,13 +53,15 @@ class LinearModelF16(gym.Env):
             shape=(self.action_dim,),
             dtype=np.float64,
         )
-        
+
         # Determine observation dimension based on state indices and reference config
-        self.state_indices_for_obs = state_indices_for_obs or list(range(self.state_dim))
+        self.state_indices_for_obs = state_indices_for_obs or list(
+            range(self.state_dim)
+        )
         self.reference_config = reference_config or {}
-        
+
         obs_dim = len(self.state_indices_for_obs) + len(self.reference_config)
-        
+
         self.observation_space = spaces.Box(
             low=self.obs_low,
             high=self.obs_high,
@@ -72,32 +78,38 @@ class LinearModelF16(gym.Env):
     def _get_obs(self) -> np.ndarray:
         """
         Get current observation as numpy array.
-        
+
         Returns:
             np.ndarray: Current observation containing selected states and tracking errors.
         """
         ref = self._get_reference()
-        
+
         # Extract tracking errors for referenced states
-        errors = np.array([ref[i] - self.state[i] for i in self.reference_config.keys()], dtype=np.float64)
-        
+        errors = np.array(
+            [ref[i] - self.state[i] for i in self.reference_config.keys()],
+            dtype=np.float64,
+        )
+
         # Extract selected state components
         selected_state = self.state[self.state_indices_for_obs]
-        
+
         # Concatenate selected states and errors
         observation = np.concatenate([selected_state, errors])
-        
+
         return observation
 
     def _get_info(self) -> dict:
         """
         Get environment information dictionary.
-        
+
         Returns:
             dict: Information about current environment state.
         """
         ref = self._get_reference()
-        tracking_error = np.array([ref[i] - self.state[i] for i in self.reference_config.keys()], dtype=np.float64)
+        tracking_error = np.array(
+            [ref[i] - self.state[i] for i in self.reference_config.keys()],
+            dtype=np.float64,
+        )
 
         info = {
             "time_s": self.current_step * self.dt,
@@ -105,8 +117,12 @@ class LinearModelF16(gym.Env):
             "observation": self._get_obs(),
             "reference": ref,
             "tracking_error": tracking_error,
-            "tracking_mse": np.mean(tracking_error**2) if len(tracking_error) > 0 else 0.0,
-            "reward": self._get_reward(self.state, self.prev_action, self.terminated, False),
+            "tracking_mse": np.mean(tracking_error**2)
+            if len(tracking_error) > 0
+            else 0.0,
+            "reward": self._get_reward(
+                self.state, self.prev_action, self.terminated, False
+            ),
         }
 
         if self.prev_action is not None:
@@ -119,11 +135,11 @@ class LinearModelF16(gym.Env):
     ) -> tuple[np.ndarray, dict]:
         """
         Reset the environment to initial state.
-        
+
         Args:
             seed: Random seed for reproducibility.
             options: Additional options (unused).
-            
+
         Returns:
             tuple: (observation, info)
         """
@@ -132,22 +148,22 @@ class LinearModelF16(gym.Env):
         self.current_step = 0
         self.terminated = False
         self.prev_action = None
-        
+
         observation = self._get_obs()
         info = self._get_info()
-        
+
         return observation, info
 
     def _get_reference(self) -> np.ndarray:
         """
         Compute reference signals at current time.
-        
+
         Returns:
             np.ndarray: Reference values for all states.
         """
         ref = np.zeros(self.state_dim, dtype=np.float64)
         t = self.current_step * self.dt
-        
+
         for idx, cfg in self.reference_config.items():
             if cfg["type"] == "sin":
                 omega = 2 * np.pi / cfg["T"]
@@ -155,16 +171,18 @@ class LinearModelF16(gym.Env):
             elif cfg["type"] == "constant":
                 ref[idx] = cfg["value"]
             else:
-                raise ValueError(f"Unknown reference type '{cfg['type']}' for state {idx}")
-                
+                raise ValueError(
+                    f"Unknown reference type '{cfg['type']}' for state {idx}"
+                )
+
         return ref
 
     def _get_reward(
-        self, 
-        state: np.ndarray, 
-        action: Optional[np.ndarray], 
-        terminated: bool, 
-        truncated: bool
+        self,
+        state: np.ndarray,
+        action: Optional[np.ndarray],
+        terminated: bool,
+        truncated: bool,
     ) -> float:
         """
         Compute reward based on tracking performance.
@@ -179,7 +197,7 @@ class LinearModelF16(gym.Env):
             float: Computed reward value.
         """
         ref = self._get_reference()
-        
+
         if len(self.reference_config) > 0:
             tracking_indices = list(self.reference_config.keys())
             tracking_error = ref[tracking_indices] - state[tracking_indices]
@@ -189,7 +207,7 @@ class LinearModelF16(gym.Env):
             # You can tune this or use max difference from observation bounds per tracked index
             Emax = 0
             for idx in tracking_indices:
-                Emax += (self.obs_high[idx] - self.obs_low[idx])**2
+                Emax += (self.obs_high[idx] - self.obs_low[idx]) ** 2
 
             # Shifted reward clipped at 0
             reward = max(0.0, Emax - squared_error)
@@ -205,7 +223,6 @@ class LinearModelF16(gym.Env):
 
         return float(reward)
 
-
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
         """
         Execute one time step of the environment.
@@ -218,20 +235,20 @@ class LinearModelF16(gym.Env):
         """
         # Ensure action is numpy array with correct dtype
         action = np.array(action, dtype=np.float64)
-        
+
         # Clip action to bounds
         action = np.clip(action, self.action_low, self.action_high)
-        
+
         # Store previous action for info
         self.prev_action = action.copy()
-        
+
         # Integrate system dynamics using Euler integration
         state_dot = self.A @ self.state + self.B @ action
         self.state = self.state + state_dot * self.dt
-        
+
         # Increment time step
         self.current_step += 1
-        
+
         # Get current observation
         observation = self._get_obs()
 
@@ -255,13 +272,13 @@ class LinearModelF16(gym.Env):
 
         # Check for truncation due to max steps
         truncated = self.current_step >= self.max_steps
-        
+
         # Compute reward
         reward = self._get_reward(self.state, action, terminated, truncated)
-        
+
         # Get info dictionary
         info = self._get_info()
-        
+
         # Update termination flag for info
         self.terminated = terminated
 
@@ -270,15 +287,17 @@ class LinearModelF16(gym.Env):
     def render(self, mode: str = "human") -> Optional[np.ndarray]:
         """
         Render the environment (basic implementation).
-        
+
         Args:
             mode: Rendering mode.
-            
+
         Returns:
             None or rendered array depending on mode.
         """
         if mode == "human":
-            print(f"Step: {self.current_step}, Time: {self.current_step * self.dt:.2f}s")
+            print(
+                f"Step: {self.current_step}, Time: {self.current_step * self.dt:.2f}s"
+            )
             print(f"State: {self.state}")
             if self.prev_action is not None:
                 print(f"Action: {self.prev_action}")
@@ -294,45 +313,6 @@ class LinearModelF16(gym.Env):
         pass
 
 
-# Example usage and testing
-if __name__ == "__main__":
-    # Example system matrices for a simple 2D system
-    A = np.array([[0, 1], [-1, -0.5]], dtype=np.float64)
-    B = np.array([[0], [1]], dtype=np.float64)
-    
-    # Reference configuration for sinusoidal tracking on first state
-    reference_config = {
-        0: {"type": "sin", "A": 1.0, "T": 2.0, "phi": 0.0}
-    }
-    
-    # Create environment
-    env = LinearModelF16(
-        A=A,
-        B=B,
-        max_steps=1000,
-        dt=0.01,
-        reference_config=reference_config,
-        state_indices_for_obs=[0, 1],  # Observe both states
-        obs_low=[-10.0, -10.0, -5.0],  # bounds for [state0, state1, error0]
-        obs_high=[10.0, 10.0, 5.0],
-        action_low=[-5.0],
-        action_high=[5.0],
-    )
-    
-    # Test environment
-    obs, info = env.reset()
-    print(f"Initial observation shape: {obs.shape}")
-    print(f"Initial observation: {obs}")
-    print(f"Action space: {env.action_space}")
-    print(f"Observation space: {env.observation_space}")
-    
-    # Take a few random steps
-    for i in range(5):
-        action = env.action_space.sample()
-        obs, reward, terminated, truncated, info = env.step(action)
-        print(f"Step {i+1}: obs={obs}, reward={reward:.3f}, done={terminated or truncated}")
-        
-        if terminated or truncated:
-            break
-    
-    env.close()
+class FaultyLinearF16(LinearModelF16):
+    def __init__(self, A_fault, **kwargs):
+        super().__init__(A=A_fault, **kwargs)
