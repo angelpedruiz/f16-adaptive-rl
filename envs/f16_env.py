@@ -257,19 +257,6 @@ class LinearModelF16(gym.Env):
             (observation < self.obs_low) | (observation > self.obs_high)
         )
 
-        if terminated:
-            violated_indices = np.where(
-                (observation < self.obs_low) | (observation > self.obs_high)
-            )[0]
-            for idx in violated_indices:
-                lower = self.obs_low[idx]
-                upper = self.obs_high[idx]
-                value = observation[idx]
-                print(
-                    f"Observation {idx} out of bounds at time {self.current_step * self.dt:.2f}s: "
-                    f"value={value:.2f}, bounds=({lower:.2f}, {upper:.2f})"
-                )
-
         # Check for truncation due to max steps
         truncated = self.current_step >= self.max_steps
 
@@ -313,6 +300,4 @@ class LinearModelF16(gym.Env):
         pass
 
 
-class FaultyLinearF16(LinearModelF16):
-    def __init__(self, A_fault, **kwargs):
-        super().__init__(A=A_fault, **kwargs)
+

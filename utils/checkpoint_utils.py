@@ -36,7 +36,7 @@ def save_checkpoint(
 
     # Save as npz (auto-pickles complex Python objects like dict, lists, etc.)
     np.savez_compressed(checkpoint_dir / f"{filename}_brain.npz", **brain)
-    print(f"🧠 Agent brain saved to {checkpoint_dir / f'{filename}_brain.npz'}")
+    print(f"\n🧠 Agent brain saved to {checkpoint_dir / f'{filename}_brain.npz'}")
 
     # === Save metrics ===
     np.save(checkpoint_dir / "returns.npy", np.array(return_queue))
