@@ -33,27 +33,19 @@ env:
   action_low: [0, -22.5]
   action_high: [0, 27]
 
-  # === Fault-related params ===
-fault:
-  fault_type: "elevator_loss"
-  #fault_type: null
-  checkpoint_interval: 10
-  seed: 42
-  resume_from: null  # Path to a .npz file or null to start fresh
 
 training: 
   episodes: 100
   seed: 42
   
   milestones_fractions:
- 
     - 0.1
     - 0.5
     - 1.0
   
   checkpoint_interval: 10000
   resume_from: null  
-  resume_from: experiments\q_learning\pitch_rate_and_theta_error_obs\checkpoint_final_ep60100\checkpoint_ep60099_brain.npz # null OR .npz file path
+  #resume_from: experiments\q_learning\pitch_rate_and_theta_error_obs\checkpoint_final_ep60100\checkpoint_ep60099_brain.npz # null OR .npz file path
   
 
 eval:
@@ -64,8 +56,12 @@ eval:
   settling_duration: 100 # Number of steps to consider for settling duration.
 
 test:
-  checkpoint_path: experiments\q_learning\pitch_rate_and_theta_error_obs\checkpoint_final_ep60100\checkpoint_ep60099_brain.npz # .npz file
+  checkpoint_path: experiments\q_learning\run_20250820_002146\checkpoint_final_ep100\checkpoint_ep99_brain.npz # .npz file
 
+online: 
+  fault_type: elevator_loss    # null/elevator_loss
+  learn: False
+  checkpoint_path: experiments\q_learning\pitch_rate_and_theta_error_obs\checkpoint_final_ep60100\checkpoint_ep60099_brain.npz #.npz
 
 optimization:
   target_metric: area_under_curve   # "episodes_to_convergence", "average_final_reward", "success_rate", "area_under_curve", "reward_volatility", "reward_slope", "stability_index"

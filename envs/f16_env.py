@@ -2,6 +2,7 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 from typing import Optional
+from data.LinearF16SS import B_f1
 
 
 class LinearModelF16(gym.Env):
@@ -138,7 +139,7 @@ class LinearModelF16(gym.Env):
 
         Args:
             seed: Random seed for reproducibility.
-            options: Additional options (unused).
+            options: Additional options {'fault_type'}
 
         Returns:
             tuple: (observation, info)
@@ -151,6 +152,15 @@ class LinearModelF16(gym.Env):
 
         observation = self._get_obs()
         info = self._get_info()
+        if options:
+            fault_type = options.get('fault_type', 'null')
+            if fault_type == "elevator_loss":
+                self.B = B_f1
+            
+            elif fault_type == None:
+                pass
+            else:
+                print(f'env.reset() error: fault {fault_type} not recognised')
 
         return observation, info
 
