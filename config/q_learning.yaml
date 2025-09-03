@@ -14,18 +14,23 @@ env:
   dt: 0.01
   state_indices_to_keep: [4] # Keep only the relevant states for observation
   reference_config:
-    1:
-      type: sin 
-      #A: 0.698 # 40 degrees in radians
-      A: 0.35 # 20 degrees in radians
-      T: 5.0
-      phi: 0.0
-    # 2:
-    #   type: constant
-    #   value: 1.0
-  # Observation space bounds (must match state_indices_to_keep length + errors(ordered))
-  #obs_low: [-1.396, -1.215, -2.0, -22.5, -2.0]
-  #obs_high: [1.396, 1.205, 2.0, 27.0, 2.0]
+    1:                      # the state index
+      type: cos_step        # choose: 'sin', 'constant', or 'cos_step'
+      
+      # Parameters for sin
+      A: 0.35               # amplitude in radians
+      T: 5.0                # period
+      phi: 0.0              # phase
+      
+      # Parameters for constant
+      value: 1.0            # constant value
+      
+      # Parameters for cos_step
+      amp_range: [-20.0, 20.0]  # amplitude limits in degrees
+      n_levels: 15               # discrete amplitude levels
+      T_step: 5.0                # step duration
+
+
   obs_low: [-1.5, -2.5]
   obs_high: [1.5, 2.5]
 
@@ -49,19 +54,19 @@ training:
   
 
 eval:
-  rolling_length: 1000
+  rolling_length: 10
   convergence_threshold: 0.05
   last_n: 50 #Number of final episodes to compute average and stability.
   settling_tolerance: 0.05
   settling_duration: 100 # Number of steps to consider for settling duration.
 
 test:
-  checkpoint_path: experiments\q_learning\pitch_rate_and_theta_error_obs\checkpoint_final_ep60100\checkpoint_ep60099_brain.npz # .npz file
+  checkpoint_path: experiments\q_learning\run_20250903_162701\checkpoint_final_ep100\checkpoint_ep99_brain.npz # .npz file
 
 online: 
   fault_type: elevator_loss    # null/elevator_loss
   learn: True
-  checkpoint_path: experiments\q_learning\pitch_rate_and_theta_error_obs\checkpoint_final_ep60100\checkpoint_ep60099_brain.npz #.npz
+  checkpoint_path: experiments\q_learning\run_20250903_162701\checkpoint_final_ep100\checkpoint_ep99_brain.npz #.npz
 
 optimization:
   target_metric: area_under_curve   # "episodes_to_convergence", "average_final_reward", "success_rate", "area_under_curve", "reward_volatility", "reward_slope", "stability_index"

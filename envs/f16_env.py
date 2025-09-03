@@ -168,6 +168,11 @@ class LinearModelF16(gym.Env):
         """
         Compute reference signals at current time.
 
+        Supports:
+            - sin: sinusoidal reference
+            - constant: constant value
+            - cos_step: cosine-smoothed step function with discrete amplitude levels
+
         Returns:
             np.ndarray: Reference values for all states.
         """
@@ -177,15 +182,40 @@ class LinearModelF16(gym.Env):
         for idx, cfg in self.reference_config.items():
             if cfg["type"] == "sin":
                 omega = 2 * np.pi / cfg["T"]
-                ref[idx] = cfg["A"] * np.sin(omega * t + cfg["phi"])
+                ref[idx] = cfg["A"] * np.sin(omega * t + cfg.get("phi", 0.0))
+
             elif cfg["type"] == "constant":
                 ref[idx] = cfg["value"]
+
+            elif cfg["type"] == "cos_step":
+                # Determine which step we are in
+                step_duration = cfg["T_step"]
+                step_idx = int(t // step_duration)  # which discrete step number
+
+                # Initialize amplitude per step if not stored
+                if not hasattr(self, "_cos_step_levels"):
+                    self._cos_step_levels = {}  # dict of lists per state
+
+                if idx not in self._cos_step_levels:
+                    self._cos_step_levels[idx] = []
+
+                # Ensure we have an amplitude for this step
+                while len(self._cos_step_levels[idx]) <= step_idx:
+                    amp_min, amp_max = cfg["amp_range"]
+                    levels = np.linspace(amp_min, amp_max, cfg["n_levels"])
+                    self._cos_step_levels[idx].append(levels[np.random.randint(cfg["n_levels"])])
+
+                # Cosine-smoothed step
+                A = self._cos_step_levels[idx][step_idx]
+                t_mod = (t % step_duration) / step_duration
+                ref[idx] = 0.5 * A * (1 - np.cos(np.pi * t_mod))
+
+
             else:
-                raise ValueError(
-                    f"Unknown reference type '{cfg['type']}' for state {idx}"
-                )
+                raise ValueError(f"Unknown reference type '{cfg['type']}' for state {idx}")
 
         return ref
+
 
     def _get_reward(
         self,
