@@ -40,6 +40,15 @@ def plot_test_episode(states, actions, references, errors, rewards, episode_id, 
             if np.any(np.abs(references[:, i]) > 1e-10):  # Non-zero with tolerance
                 tracked_indices.append(i)
 
+    # Calculate MSE for each tracked state
+    mse_values = []
+    for j, state_idx in enumerate(tracked_indices):
+        if j < errors.shape[1]:
+            mse = np.mean(errors[:, j] ** 2)
+            mse_values.append(mse)
+        else:
+            mse_values.append(0.0)
+
     total_plots = states.shape[1] + actions.shape[1] + len(tracked_indices)
 
     if total_plots <= 5:
@@ -89,7 +98,7 @@ def plot_test_episode(states, actions, references, errors, rewards, episode_id, 
             spine.set_color("white")
         plot_idx += 1
 
-    # === Plot tracking errors ===
+    # === Plot tracking errors with MSE annotations ===
     for j, state_idx in enumerate(tracked_indices):
         if j < errors.shape[1]:  # Make sure we don't exceed error array bounds
             ax = axes[plot_idx]
@@ -97,6 +106,13 @@ def plot_test_episode(states, actions, references, errors, rewards, episode_id, 
             label = state_labels[state_idx] if state_idx < len(state_labels) else f"State {state_idx}"
             ax.set_ylabel(f"{label} Tracking Error", color="white")
             ax.set_xlabel("Time Step", color="white")
+            
+            # Add MSE annotation
+            mse_text = f"MSE: {mse_values[j]:.4f}"
+            ax.text(0.02, 0.95, mse_text, transform=ax.transAxes, 
+                   bbox=dict(boxstyle="round,pad=0.3", facecolor="darkred", alpha=0.8),
+                   color="white", fontsize=10, verticalalignment='top')
+            
             ax.grid(True, alpha=0.3)
             ax.set_facecolor("black")
             ax.tick_params(colors="white")
@@ -108,9 +124,12 @@ def plot_test_episode(states, actions, references, errors, rewards, episode_id, 
     for j in range(plot_idx, len(axes)):
         axes[j].axis("off")
 
+    # Include overall MSE summary in title
+    overall_mse = np.mean(mse_values) if mse_values else 0.0
     total_reward = sum(rewards)
     fig.suptitle(
-        f"Test Episode {episode_id} — State, Action & Tracking Error Evolution (Total Reward: {total_reward:.1f})",
+        f"Test Episode {episode_id} — State, Action & Tracking Error Evolution\n"
+        f"Total Reward: {total_reward:.1f} | Avg MSE: {overall_mse:.4f}",
         color="white", fontsize=14, fontweight="bold", y=0.95
     )
 

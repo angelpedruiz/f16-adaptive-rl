@@ -56,11 +56,11 @@ eval:
   settling_duration: 100 # Number of steps to consider for settling duration.
 
 test:
-  checkpoint_path: experiments\q_learning\run_20250820_002146\checkpoint_final_ep100\checkpoint_ep99_brain.npz # .npz file
+  checkpoint_path: experiments\q_learning\pitch_rate_and_theta_error_obs\checkpoint_final_ep60100\checkpoint_ep60099_brain.npz # .npz file
 
 online: 
   fault_type: elevator_loss    # null/elevator_loss
-  learn: False
+  learn: True
   checkpoint_path: experiments\q_learning\pitch_rate_and_theta_error_obs\checkpoint_final_ep60100\checkpoint_ep60099_brain.npz #.npz
 
 optimization:

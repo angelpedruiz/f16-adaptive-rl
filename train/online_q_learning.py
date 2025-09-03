@@ -10,7 +10,6 @@ from envs.f16_env import LinearModelF16
 from utils.checkpoint_utils import load_checkpoint
 from utils.discretizer import UniformTileCoding
 from utils.test_utils import plot_test_episode
-from utils.online_utils import apply_fault
 '''
 The purpose of this script is to simulate and analyse online learning starting from a offline trained checkpoint on the nominal case.
 1. Load config and checkpoint
