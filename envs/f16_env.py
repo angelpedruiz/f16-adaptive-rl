@@ -3,6 +3,7 @@ from gymnasium import spaces
 import numpy as np
 from typing import Optional
 from data.LinearF16SS import B_f1
+from utils.reference_utils import cosine_smooth, step_reference, generate_cos_step_sequence
 
 
 class LinearModelF16(gym.Env):
@@ -131,38 +132,45 @@ class LinearModelF16(gym.Env):
 
         return info
 
-    def reset(
-        self, seed: Optional[int] = None, options: Optional[dict] = None
-    ) -> tuple[np.ndarray, dict]:
-        """
-        Reset the environment to initial state.
-
-        Args:
-            seed: Random seed for reproducibility.
-            options: Additional options {'fault_type'}
-
-        Returns:
-            tuple: (observation, info)
-        """
+    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> tuple[np.ndarray, dict]:
         super().reset(seed=seed)
         self.state = np.zeros(self.state_dim, dtype=np.float64)
         self.current_step = 0
         self.terminated = False
         self.prev_action = None
 
-        observation = self._get_obs()
-        info = self._get_info()
         if options:
             fault_type = options.get('fault_type', 'null')
             if fault_type == "elevator_loss":
                 self.B = B_f1
-            
-            elif fault_type == None:
+            elif fault_type is None:
                 pass
             else:
                 print(f'env.reset() error: fault {fault_type} not recognised')
 
+        # --- generate references *before* first observation
+        if self.reference_config:
+            self.reference = {}
+            for idx, cfg in self.reference_config.items():
+                if cfg["type"] == "cos_step":
+                    time_seq, ref_seq = generate_cos_step_sequence(
+                        cfg,
+                        max_time=self.max_steps * self.dt,
+                        dt=self.dt,
+                        seed=cfg.get("seed", None),
+                    )
+                    self.reference[idx] = {"t": time_seq, "y": ref_seq}
+                else:
+                    self.reference[idx] = None
+        else:
+            self.reference = {}
+
+        # Now safe to call _get_obs (uses self.reference)
+        observation = self._get_obs()
+        info = self._get_info()
+
         return observation, info
+
 
     def _get_reference(self) -> np.ndarray:
         """
@@ -188,27 +196,12 @@ class LinearModelF16(gym.Env):
                 ref[idx] = cfg["value"]
 
             elif cfg["type"] == "cos_step":
-                # Determine which step we are in
-                step_duration = cfg["T_step"]
-                step_idx = int(t // step_duration)  # which discrete step number
-
-                # Initialize amplitude per step if not stored
-                if not hasattr(self, "_cos_step_levels"):
-                    self._cos_step_levels = {}  # dict of lists per state
-
-                if idx not in self._cos_step_levels:
-                    self._cos_step_levels[idx] = []
-
-                # Ensure we have an amplitude for this step
-                while len(self._cos_step_levels[idx]) <= step_idx:
-                    amp_min, amp_max = cfg["amp_range"]
-                    levels = np.linspace(amp_min, amp_max, cfg["n_levels"])
-                    self._cos_step_levels[idx].append(levels[np.random.randint(cfg["n_levels"])])
-
-                # Cosine-smoothed step
-                A = self._cos_step_levels[idx][step_idx]
-                t_mod = (t % step_duration) / step_duration
-                ref[idx] = 0.5 * A * (1 - np.cos(np.pi * t_mod))
+                seq_t = self.reference[idx]["t"]
+                seq_y = self.reference[idx]["y"]
+                time_idx = min(
+                    int(t / self.dt), len(seq_t) - 1
+                )
+                ref[idx] = seq_y[time_idx]
 
 
             else:

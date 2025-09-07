@@ -10,12 +10,24 @@ agent:
   action_bins: [1, 20]
 
 env:
-  max_steps: 2000
+  max_steps: 3000
   dt: 0.01
   state_indices_to_keep: [4] # Keep only the relevant states for observation
   reference_config:
     1:                      # the state index
       type: cos_step        # choose: 'sin', 'constant', or 'cos_step'
+      amplitude:
+        min: -0.349        # minimum amplitude (degrees for cos_step, radians for sin)
+        max: 0.349          # maximum amplitude (degrees for cos_step, radians for sin)
+        n_levels: 15      # number of discrete levels (for cos_step)
+      step_duration: 
+        min: 5.0            # minimum duration of each reference segment (seconds)
+        max: 5.0        # maximum duration of each reference segment (seconds)
+        n_levels: 1
+      transition_duration:
+        min: 3.0           # minimum duration of gap between segments (seconds)
+        max: 5.0            # maximum duration of gap between segments (seconds)
+        n_levels: 3
       
       # Parameters for sin
       A: 0.35               # amplitude in radians
@@ -61,7 +73,7 @@ eval:
   settling_duration: 100 # Number of steps to consider for settling duration.
 
 test:
-  checkpoint_path: experiments\q_learning\run_20250903_162701\checkpoint_final_ep100\checkpoint_ep99_brain.npz # .npz file
+  checkpoint_path: experiments\q_learning\pitch_rate_and_theta_error_obs\checkpoint_final_ep60100\checkpoint_ep60099_brain.npz # .npz file
 
 online: 
   fault_type: elevator_loss    # null/elevator_loss
