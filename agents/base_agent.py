@@ -26,7 +26,6 @@ class Agent:
             self.action_discretizer = action_discretizer
             self.num_actions = np.prod(self.action_discretizer.space.nvec)
 
-        
         self.q_values = defaultdict(lambda: np.zeros(self.num_actions))
         self.lr = learning_rate
         self.discount_factor = discount_factor
@@ -49,32 +48,5 @@ class Agent:
         undiscretized_action = self.action_discretizer.undiscretize(action)
         return undiscretized_action
 
-
     def decay_epsilon(self):
         self.epsilon = max(self.final_epsilon, self.epsilon - self.epsilon_decay)
-
-
-class DQN(nn.Module):
-    def __init__(self, input_dim, output_dim, hidden_dim):
-        super(DQN, self).__init__()
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.out = nn.Linear(128, output_dim)
-
-    def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = self.out(x)
-        return x
-
-
-class ReplayMemory:
-    def __init__(self, maxlen):
-        self.memory = deque([], maxlen=maxlen)
-
-    def append(self, transition):
-        self.memory.append(transition)
-
-    def sample(self, sample_size):
-        return random.sample(self.memory, sample_size)
-
-    def __len__(self):
-        return len(self.memory)

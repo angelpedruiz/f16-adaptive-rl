@@ -30,8 +30,10 @@ def save_checkpoint(
 
     # === Save agent brain ===
     brain = agent.get_brain()
-    brain["obs_discretizer"] = agent.obs_discretizer.get_params()
-    brain["action_discretizer"] = agent.action_discretizer.get_params()
+    # if the agent uses discretizers, save their params too
+    if hasattr(agent, "obs_discretizer"):
+        brain["obs_discretizer"] = agent.obs_discretizer.get_params()
+        brain["action_discretizer"] = agent.action_discretizer.get_params()
     brain["episode"] = current_episode
 
     # Save as npz (auto-pickles complex Python objects like dict, lists, etc.)
