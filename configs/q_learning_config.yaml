@@ -1,0 +1,94 @@
+# Q-Learning Agent Configuration Template
+# Complete configuration for tabular Q-Learning agent training
+
+agent:
+  type: "q_learning"
+  
+  # Learning parameters
+  learning_rate: 0.4           # Q-learning update rate
+  initial_epsilon: 1.0         # Starting exploration rate
+  final_epsilon: 0.1           # Final exploration rate
+  epsilon_decay: null          # Decay rate (auto-calculated if null)
+  discount_factor: 0.95        # Reward discount factor
+  
+  # Discretization settings
+  obs_discretizer:
+    type: "uniform_tile_coding"
+    bins: [10, 10]  # Bins per observation dimension (1 state + 1 error = 2 dims)
+  
+  action_discretizer:
+    type: "uniform_tile_coding"  
+    bins: [1, 10]                # Bins per action dimension
+
+environment:
+  name: "f16"                  # Environment name
+  
+  # Environment parameters
+  max_steps: 3000              # Maximum steps per episode
+  dt: 0.01                     # Time step size
+  
+  # State configuration  
+  state_indices_for_obs: [4]  # State indices for observations [pitch_rate, theta]
+  
+  # Action and observation bounds
+  action_low: [0, -22.5]       # Action space lower bounds
+  action_high: [0, 27.0]       # Action space upper bounds
+  obs_low: [-2.0, -1.0]        # Observation bounds
+  obs_high: [2.0, 1.0]         # Observation bounds
+  
+  # Reference signal configuration
+  reference_config:
+    1:                         # State index for reference (theta)
+      type: "cos_step"         # Reference type
+      
+      # Cosine step reference parameters
+      amplitude:
+        min: -20.0             # Min amplitude (degrees)  
+        max: 20.0              # Max amplitude (degrees)
+        n_levels: 15           # Number of amplitude levels
+      
+      step_duration:
+        min: 5.0               # Min step duration
+        max: 5.0               # Max step duration
+        n_levels: 1
+      
+      transition_duration:
+        min: 3.0               # Min transition duration
+        max: 5.0               # Max transition duration  
+        n_levels: 3
+
+training:
+  episodes: 500            # Total training episodes
+  seed: 42                     # Random seed
+  log_frequency: 100          # Log every N episodes
+  detailed_logging: true       # Enable detailed logging
+
+checkpointing:
+  interval: 100              # Checkpoint every N episodes
+  keep_last_n: 3              # Keep last N checkpoints
+  save_best: true             # Save best checkpoint
+  resume_from: null           # Resume checkpoint path
+
+plotting:
+  enabled: true               # Enable/disable all plotting (set to false for faster training)
+  
+  # Training metrics
+  training_metrics:
+    interval: 200            # Plot every N episodes
+    rolling_window: 10       # Rolling average window
+    save_individual: true      # Save individual plots
+  
+  # Trajectory episodes
+  trajectories:
+    episodes: [1, 30000, 60000]  # Episodes to plot trajectories
+    save_data: true            # Save trajectory data
+  
+  # Plot settings
+  figure_size: [12, 8]         # Figure dimensions
+  dpi: 150                     # Resolution
+  style: "seaborn"             # Plot style
+
+evaluation:
+  rolling_window: 1000         # Performance evaluation window
+  convergence_threshold: 0.02  # Convergence threshold
+  stability_episodes: 100      # Stability check episodes

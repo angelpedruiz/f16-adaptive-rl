@@ -1,0 +1,58 @@
+# Speed Test Configuration - Minimal setup for performance testing
+agent:
+  type: "q_learning"
+  learning_rate: 0.4
+  initial_epsilon: 1.0
+  final_epsilon: 0.1
+  epsilon_decay: null
+  discount_factor: 0.95
+  obs_discretizer:
+    type: "uniform_tile_coding"
+    bins: [5, 5, 5, 5, 5, 5, 5, 5]  # Smaller bins for speed
+  action_discretizer:
+    type: "uniform_tile_coding"
+    bins: [1, 5]  # Smaller bins for speed
+
+environment:
+  name: "f16"
+  max_steps: 100               # Much shorter episodes for testing
+  dt: 0.01
+  state_indices_for_obs: [4, 1]
+  action_low: [0, -22.5]
+  action_high: [0, 27.0]
+  obs_low: [-2.0, -1.0]
+  obs_high: [2.0, 1.0]
+  reference_config:
+    1:
+      type: "cos_step"
+      amp_range: [-20.0, 20.0]
+      n_levels: 5  # Reduced for speed
+      T_step: 1.0  # Shorter steps
+      step_duration:
+        min: 1.0
+        max: 1.0
+        n_levels: 1
+      transition_duration:
+        min: 0.5
+        max: 0.5
+        n_levels: 1
+
+training:
+  episodes: 10                 # Very small number for speed testing
+  seed: 42
+  log_frequency: 1000          # Very infrequent logging
+  detailed_logging: false
+
+checkpointing:
+  interval: 1000               # No checkpointing during test
+  keep_last_n: 1
+  save_best: false
+  resume_from: null
+
+plotting:
+  enabled: false               # No plotting for speed test
+
+evaluation:
+  rolling_window: 10
+  convergence_threshold: 0.02
+  stability_episodes: 5

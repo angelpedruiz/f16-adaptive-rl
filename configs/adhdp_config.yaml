@@ -1,0 +1,103 @@
+# ADHDP Agent Configuration Template
+# Complete configuration for Adaptive Dynamic Programming agent training
+
+agent:
+  type: ADHDP
+  
+  # Network architecture
+  obs_dim: 2                    # Observation space dimension
+  act_dim: 2                    # Action space dimension  
+  hidden_dim: 32               # Hidden layer size
+  num_layers: 2                # Number of hidden layers
+  
+  # Learning parameters
+  actor_lr: 0.005              # Actor learning rate
+  critic_lr: 0.005             # Critic learning rate
+  gamma: 0.99                  # Discount factor
+  noise: true                  # Enable action noise for exploration
+  device: "cpu"                # Device: "cpu" or "cuda"
+
+environment:
+  name: "f16"                  # Environment name
+  
+  # Environment parameters
+  max_steps: 3000              # Maximum steps per episode
+  dt: 0.01                     # Time step size
+  
+  # State configuration
+  state_indices_for_obs: [4]   # State indices to include in observations
+  
+  # Action and observation bounds
+  action_low: [0, -22.5]       # Action space lower bounds
+  action_high: [0, 27.0]       # Action space upper bounds
+  obs_low: [-1.5, -2.5]        # Observation space lower bounds  
+  obs_high: [1.5, 2.5]         # Observation space upper bounds
+  
+  # Reference signal configuration
+  reference_config:
+    1:                         # State index for reference
+      type: "sin"              # Reference type: "sin", "constant", "cos_step"
+      
+      # Sinusoidal reference parameters
+      A: 0.35                  # Amplitude (radians)
+      T: 5.0                   # Period (seconds)
+      phi: 0.0                 # Phase offset
+      
+      # Alternative reference parameters
+      amplitude:
+        min: -0.349            # Min amplitude
+        max: 0.349             # Max amplitude  
+        n_levels: 15           # Discrete levels
+      step_duration:
+        min: 5.0               # Min step duration
+        max: 5.0               # Max step duration
+        n_levels: 1            # Duration levels
+      transition_duration:
+        min: 3.0               # Min transition time
+        max: 5.0               # Max transition time
+        n_levels: 3            # Transition levels
+
+training:
+  episodes: 1000               # Total training episodes
+  seed: 42                     # Random seed for reproducibility
+  log_frequency: 100           # Log statistics every N episodes
+  detailed_logging: true       # Enable detailed logging
+  
+  # Training milestones for analysis
+  milestones_fractions:        # Fractions of total episodes for milestone analysis
+    - 0.1                      # 10% of training
+    - 0.5                      # 50% of training  
+    - 1.0                      # End of training
+
+checkpointing:
+  interval: 200                # Save checkpoint every N episodes
+  keep_last_n: 5              # Keep last N checkpoints
+  save_best: true             # Save best performing checkpoint
+  resume_from: null           # Path to checkpoint to resume from (null for new training)
+
+plotting:
+  # Training metrics plotting
+  training_metrics:
+    interval: 100              # Create plots every N episodes
+    rolling_window: 50         # Rolling average window size
+    save_individual: true      # Save individual metric plots
+  
+  # Trajectory plotting for specific episodes
+  trajectories:
+    episodes: [1, 100, 500, 1000]  # Episodes to record and plot trajectories
+    save_data: true            # Save trajectory data to files
+  
+  # Plot styling
+  figure_size: [12, 8]         # Figure size (width, height)
+  dpi: 150                     # Plot resolution
+  style: "default"             # Matplotlib style
+
+evaluation:
+  # Performance evaluation settings
+  rolling_window: 100          # Rolling window for performance evaluation
+  convergence_threshold: 0.05  # Threshold for convergence detection
+  stability_episodes: 50       # Episodes to check for stability
+  
+  # Testing configuration
+  test_episodes: 10            # Episodes for final testing
+  test_deterministic: true     # Use deterministic policy for testing

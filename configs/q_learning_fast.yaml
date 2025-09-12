@@ -1,0 +1,77 @@
+# Q-Learning Agent Configuration - Fast Training (No Plotting)
+# Optimized configuration for speed with plotting disabled
+
+agent:
+  type: "q_learning"
+  
+  # Learning parameters
+  learning_rate: 0.4           # Q-learning update rate
+  initial_epsilon: 1.0         # Starting exploration rate
+  final_epsilon: 0.1           # Final exploration rate
+  epsilon_decay: null          # Decay rate (auto-calculated if null)
+  discount_factor: 0.95        # Reward discount factor
+  
+  # Discretization settings
+  obs_discretizer:
+    type: "uniform_tile_coding"
+    bins: [10, 10, 10, 10, 10, 10, 10, 10]  # Bins per observation dimension
+  
+  action_discretizer:
+    type: "uniform_tile_coding"  
+    bins: [1, 10]                # Bins per action dimension
+
+environment:
+  name: "f16"                  # Environment name
+  
+  # Environment parameters
+  max_steps: 3000              # Maximum steps per episode
+  dt: 0.01                     # Time step size
+  
+  # State configuration  
+  state_indices_for_obs: [4, 1]  # State indices for observations [pitch_rate, theta]
+  
+  # Action and observation bounds
+  action_low: [0, -22.5]       # Action space lower bounds
+  action_high: [0, 27.0]       # Action space upper bounds
+  obs_low: [-2.0, -1.0]        # Observation bounds
+  obs_high: [2.0, 1.0]         # Observation bounds
+  
+  # Reference signal configuration
+  reference_config:
+    1:                         # State index for reference (theta)
+      type: "cos_step"         # Reference type
+      
+      # Cosine step reference parameters
+      amp_range: [-20.0, 20.0] # Amplitude range (degrees)
+      n_levels: 15             # Number of amplitude levels
+      T_step: 5.0              # Step duration (seconds)
+      
+      step_duration:
+        min: 5.0               # Min step duration
+        max: 5.0               # Max step duration
+        n_levels: 1
+      
+      transition_duration:
+        min: 3.0               # Min transition duration
+        max: 5.0               # Max transition duration  
+        n_levels: 3
+
+training:
+  episodes: 100                # Reduced episodes for testing
+  seed: 42                     # Random seed
+  log_frequency: 20            # Log every N episodes
+  detailed_logging: false      # Disable detailed logging for speed
+
+checkpointing:
+  interval: 1000               # Less frequent checkpointing
+  keep_last_n: 1               # Keep fewer checkpoints
+  save_best: true              # Save best checkpoint
+  resume_from: null            # Resume checkpoint path
+
+plotting:
+  enabled: false               # DISABLED for faster training
+
+evaluation:
+  rolling_window: 100          # Smaller evaluation window
+  convergence_threshold: 0.02  # Convergence threshold
+  stability_episodes: 50       # Fewer stability check episodes
