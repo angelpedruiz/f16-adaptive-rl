@@ -95,6 +95,9 @@ class CheckpointManager:
         # Add to tracked checkpoints
         self.saved_checkpoints.append(checkpoint_dir)
         
+        # Reset restored stats tracking
+        self.restored_stats = {}
+        
         # Clean up old checkpoints if needed
         if not is_final:
             self._cleanup_old_checkpoints()
@@ -136,6 +139,9 @@ class CheckpointManager:
         
         # Load training statistics if available
         self._load_training_stats(env, checkpoint_dir)
+        
+        # Load additional training stats files for plotting continuity
+        self._load_additional_stats(checkpoint_dir)
         
         return resume_episode + 1  # Resume from next episode
     
@@ -320,15 +326,32 @@ class CheckpointManager:
     
     def _load_training_stats(self, env: gym.Env, checkpoint_dir: Path) -> None:
         """Load training statistics if available."""
-        # This is more complex with RecordEpisodeStatistics wrapper
-        # For now, just check if files exist
         returns_file = checkpoint_dir / "returns.npy"
         lengths_file = checkpoint_dir / "lengths.npy"
         
         if returns_file.exists() and lengths_file.exists():
-            # Files exist but restoring to wrapper is complex
-            # Could implement if needed for exact resume functionality
-            pass
+            try:
+                # Load the saved statistics
+                saved_returns = np.load(returns_file)
+                saved_lengths = np.load(lengths_file)
+                
+                # Try to restore statistics to the wrapper
+                if hasattr(env, 'return_queue') and hasattr(env, 'length_queue'):
+                    # Clear current queues and restore from checkpoint
+                    env.return_queue.clear()
+                    env.length_queue.clear()
+                    
+                    # Add saved data back to queues
+                    for ret in saved_returns:
+                        env.return_queue.append(float(ret))
+                    for length in saved_lengths:
+                        env.length_queue.append(int(length))
+                        
+                    print(f"Restored {len(saved_returns)} episode returns and {len(saved_lengths)} episode lengths")
+                    
+            except Exception as e:
+                print(f"Warning: Could not restore training statistics: {e}")
+                pass
     
     def _find_agent_file(self, checkpoint_dir: Path) -> Path:
         """Find the agent file in checkpoint directory."""
@@ -346,6 +369,31 @@ class CheckpointManager:
                 return files[0]  # Return first match
         
         raise FileNotFoundError(f"No agent file found in {checkpoint_dir}")
+    
+    def _load_additional_stats(self, checkpoint_dir: Path) -> None:
+        """Load additional statistics files for training continuity."""
+        # Load any other .npy files that might contain training metrics
+        stats_files = {
+            'training_errors.npy': 'training_errors',
+            'epsilon_values.npy': 'epsilon_values', 
+            'learning_rates.npy': 'learning_rates'
+        }
+        
+        self.restored_stats = {}
+        
+        for filename, key in stats_files.items():
+            filepath = checkpoint_dir / filename
+            if filepath.exists():
+                try:
+                    data = np.load(filepath)
+                    self.restored_stats[key] = data.tolist() if hasattr(data, 'tolist') else data
+                    print(f"Restored {len(data)} {key} values")
+                except Exception as e:
+                    print(f"Warning: Could not load {filename}: {e}")
+    
+    def get_restored_stats(self) -> Dict[str, Any]:
+        """Get any statistics that were restored from checkpoint."""
+        return getattr(self, 'restored_stats', {})
     
     def _cleanup_old_checkpoints(self) -> None:
         """Remove old checkpoints to save disk space."""

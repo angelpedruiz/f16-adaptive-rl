@@ -32,10 +32,11 @@ class TrainingLogger:
         self.run_dir = Path(run_dir)
         self.training_config = training_config
         
-        # Initialize storage for various metrics
-        self.episode_rewards = []
-        self.episode_lengths = []
-        self.training_errors = []
+        # Store references to env and agent for direct access
+        self.env = None
+        self.agent = None
+        
+        # Initialize storage for custom metrics only
         self.custom_metrics = {}
         
         # Agent-specific metrics
@@ -46,9 +47,15 @@ class TrainingLogger:
         self.episode_times = []
         self.start_time = datetime.now()
         
-        # Configuration
-        self.save_frequency = training_config.get("log_frequency", 100)
+        # Configuration (optimized default for better performance)
+        self.save_frequency = training_config.get("log_frequency", 500)
         self.detailed_logging = training_config.get("detailed_logging", True)
+        
+        # Track if we're resuming from checkpoint
+        self.is_resumed = False
+        
+        # Load existing logs if they exist (for resuming)
+        self._load_existing_logs()
     
     def log_episode(self, episode: int, env: gym.Env, agent: object) -> None:
         """
@@ -59,38 +66,71 @@ class TrainingLogger:
             env: Environment (with RecordEpisodeStatistics wrapper)
             agent: Agent that completed the episode
         """
-        # Extract episode statistics from environment (optimized)
-        if hasattr(env, 'return_queue') and len(env.return_queue) > 0:
-            latest_reward = env.return_queue[-1]  # Direct access to last element
-            self.episode_rewards.append(float(latest_reward))
+        # Store references for direct access
+        self.env = env
+        self.agent = agent
         
-        if hasattr(env, 'length_queue') and len(env.length_queue) > 0:
-            latest_length = env.length_queue[-1]  # Direct access to last element
-            self.episode_lengths.append(int(latest_length))
+        # Minimize logging overhead - only log metrics when really needed
+        log_metrics_now = (
+            episode % 50 == 0 or 
+            episode == 0 or 
+            (episode + 1) % self.save_frequency == 0
+        )
         
-        # Log agent-specific metrics
-        self._log_agent_metrics(agent)
-        
-        # Log custom metrics if agent provides them
-        if hasattr(agent, 'get_metrics'):
-            metrics = agent.get_metrics()
-            for key, value in metrics.items():
-                if key not in self.custom_metrics:
-                    self.custom_metrics[key] = []
-                self.custom_metrics[key].append(value)
+        if log_metrics_now:
+            # Log agent-specific metrics (optimized)
+            if hasattr(agent, 'epsilon'):
+                self.epsilon_values.append(float(agent.epsilon))
+            
+            # Skip custom metrics unless explicitly enabled
+            if self.detailed_logging and hasattr(agent, 'get_metrics'):
+                metrics = agent.get_metrics()
+                for key, value in metrics.items():
+                    if key not in self.custom_metrics:
+                        self.custom_metrics[key] = []
+                    self.custom_metrics[key].append(value)
         
         # Save logs periodically
         if (episode + 1) % self.save_frequency == 0:
             self.save_logs()
     
+    def restore_from_checkpoint(self, checkpoint_manager) -> None:
+        """
+        Restore training logger state from checkpoint data.
+        
+        Args:
+            checkpoint_manager: CheckpointManager with restored statistics
+        """
+        if hasattr(checkpoint_manager, 'get_restored_stats'):
+            restored_stats = checkpoint_manager.get_restored_stats()
+            
+            # Restore custom metrics and agent metrics
+            if 'training_errors' in restored_stats:
+                # Don't store in custom_metrics as it's handled by agent
+                pass
+                
+            if 'epsilon_values' in restored_stats:
+                self.epsilon_values = list(restored_stats['epsilon_values'])
+                print(f"Restored {len(self.epsilon_values)} epsilon values")
+                
+            if 'learning_rates' in restored_stats:
+                self.learning_rates = list(restored_stats['learning_rates'])
+                print(f"Restored {len(self.learning_rates)} learning rate values")
+            
+            # Mark as resumed
+            self.is_resumed = True
+    
     def log_training_error(self, error: float) -> None:
         """
         Log training error (e.g., TD error, loss).
         
+        Note: This method is kept for backwards compatibility.
+        Training errors are now accessed directly from agent.training_error.
+        
         Args:
             error: Training error value
         """
-        self.training_errors.append(float(error))
+        pass
     
     def log_custom_metric(self, name: str, value: Any) -> None:
         """
@@ -112,17 +152,32 @@ class TrainingLogger:
             Dictionary containing all tracked metrics
         """
         stats = {
-            'episode_rewards': self.episode_rewards,
-            'episode_lengths': self.episode_lengths,
-            'training_errors': self.training_errors,
             'epsilon_values': self.epsilon_values,
             'learning_rates': self.learning_rates,
         }
+        
+        # Get episode data from environment queues
+        if self.env and hasattr(self.env, 'return_queue'):
+            stats['episode_rewards'] = list(self.env.return_queue)
+        
+        if self.env and hasattr(self.env, 'length_queue'):
+            stats['episode_lengths'] = list(self.env.length_queue)
+        
+        # Get training errors from agent
+        if self.agent and hasattr(self.agent, 'training_error'):
+            if isinstance(self.agent.training_error, list):
+                stats['training_errors'] = self.agent.training_error
+            else:
+                stats['training_errors'] = [self.agent.training_error]
         
         # Add custom metrics
         stats.update(self.custom_metrics)
         
         return stats
+    
+    def is_resuming(self) -> bool:
+        """Check if this logger is resuming from a checkpoint."""
+        return self.is_resumed
     
     def get_recent_performance(self, n_episodes: int = 100) -> Dict[str, float]:
         """
@@ -136,36 +191,47 @@ class TrainingLogger:
         """
         performance = {}
         
-        if self.episode_rewards:
-            recent_rewards = self.episode_rewards[-n_episodes:]
+        # Get episode rewards from environment
+        if self.env and hasattr(self.env, 'return_queue') and len(self.env.return_queue) > 0:
+            recent_rewards = list(self.env.return_queue)[-n_episodes:]
             performance['mean_reward'] = float(np.mean(recent_rewards))
             performance['std_reward'] = float(np.std(recent_rewards))
             performance['max_reward'] = float(np.max(recent_rewards))
             performance['min_reward'] = float(np.min(recent_rewards))
         
-        if self.episode_lengths:
-            recent_lengths = self.episode_lengths[-n_episodes:]
+        # Get episode lengths from environment
+        if self.env and hasattr(self.env, 'length_queue') and len(self.env.length_queue) > 0:
+            recent_lengths = list(self.env.length_queue)[-n_episodes:]
             performance['mean_length'] = float(np.mean(recent_lengths))
             performance['std_length'] = float(np.std(recent_lengths))
         
-        if self.training_errors:
-            recent_errors = self.training_errors[-n_episodes:]
-            performance['mean_training_error'] = float(np.mean(recent_errors))
-            performance['std_training_error'] = float(np.std(recent_errors))
+        # Get training errors from agent
+        if self.agent and hasattr(self.agent, 'training_error'):
+            if isinstance(self.agent.training_error, list) and len(self.agent.training_error) > 0:
+                recent_errors = self.agent.training_error[-n_episodes:]
+                performance['mean_training_error'] = float(np.mean(recent_errors))
+                performance['std_training_error'] = float(np.std(recent_errors))
+            elif not isinstance(self.agent.training_error, list):
+                performance['mean_training_error'] = float(self.agent.training_error)
+                performance['std_training_error'] = 0.0
         
         return performance
     
     def save_logs(self) -> None:
         """Save current logs to files."""
-        # Save episode-wise data as numpy arrays
-        if self.episode_rewards:
-            np.save(self.run_dir / "episode_rewards.npy", np.array(self.episode_rewards))
+        # Save episode-wise data from environment queues
+        if self.env and hasattr(self.env, 'return_queue') and len(self.env.return_queue) > 0:
+            np.save(self.run_dir / "episode_rewards.npy", np.array(list(self.env.return_queue)))
         
-        if self.episode_lengths:
-            np.save(self.run_dir / "episode_lengths.npy", np.array(self.episode_lengths))
+        if self.env and hasattr(self.env, 'length_queue') and len(self.env.length_queue) > 0:
+            np.save(self.run_dir / "episode_lengths.npy", np.array(list(self.env.length_queue)))
         
-        if self.training_errors:
-            np.save(self.run_dir / "training_errors.npy", np.array(self.training_errors))
+        # Save training errors from agent
+        if self.agent and hasattr(self.agent, 'training_error'):
+            if isinstance(self.agent.training_error, list) and len(self.agent.training_error) > 0:
+                np.save(self.run_dir / "training_errors.npy", np.array(self.agent.training_error))
+            elif not isinstance(self.agent.training_error, list):
+                np.save(self.run_dir / "training_errors.npy", np.array([self.agent.training_error]))
         
         # Save agent metrics
         if self.epsilon_values:
@@ -198,6 +264,16 @@ class TrainingLogger:
         # Final save of all logs
         self.save_logs()
         
+        # Get episode data for summary
+        episode_rewards = []
+        episode_lengths = []
+        
+        if self.env and hasattr(self.env, 'return_queue'):
+            episode_rewards = list(self.env.return_queue)
+        
+        if self.env and hasattr(self.env, 'length_queue'):
+            episode_lengths = list(self.env.length_queue)
+        
         # Create comprehensive summary
         summary = {
             'training_info': {
@@ -209,31 +285,31 @@ class TrainingLogger:
                 'episodes_per_second': (final_episode + 1) / training_time if training_time > 0 else 0
             },
             'configuration': self.training_config,
-            'final_performance': self.get_recent_performance(min(100, len(self.episode_rewards))),
+            'final_performance': self.get_recent_performance(min(100, len(episode_rewards)) if episode_rewards else 100),
             'training_progress': {
-                'total_episodes': len(self.episode_rewards),
-                'total_steps': sum(self.episode_lengths) if self.episode_lengths else 0
+                'total_episodes': len(episode_rewards),
+                'total_steps': sum(episode_lengths) if episode_lengths else 0
             }
         }
         
         # Add statistical analysis
-        if self.episode_rewards:
+        if episode_rewards:
             summary['reward_statistics'] = {
-                'overall_mean': float(np.mean(self.episode_rewards)),
-                'overall_std': float(np.std(self.episode_rewards)),
-                'overall_max': float(np.max(self.episode_rewards)),
-                'overall_min': float(np.min(self.episode_rewards)),
-                'first_quartile': float(np.percentile(self.episode_rewards, 25)),
-                'median': float(np.percentile(self.episode_rewards, 50)),
-                'third_quartile': float(np.percentile(self.episode_rewards, 75))
+                'overall_mean': float(np.mean(episode_rewards)),
+                'overall_std': float(np.std(episode_rewards)),
+                'overall_max': float(np.max(episode_rewards)),
+                'overall_min': float(np.min(episode_rewards)),
+                'first_quartile': float(np.percentile(episode_rewards, 25)),
+                'median': float(np.percentile(episode_rewards, 50)),
+                'third_quartile': float(np.percentile(episode_rewards, 75))
             }
         
-        if self.episode_lengths:
+        if episode_lengths:
             summary['length_statistics'] = {
-                'mean_episode_length': float(np.mean(self.episode_lengths)),
-                'std_episode_length': float(np.std(self.episode_lengths)),
-                'max_episode_length': int(np.max(self.episode_lengths)),
-                'min_episode_length': int(np.min(self.episode_lengths))
+                'mean_episode_length': float(np.mean(episode_lengths)),
+                'std_episode_length': float(np.std(episode_lengths)),
+                'max_episode_length': int(np.max(episode_lengths)),
+                'min_episode_length': int(np.min(episode_lengths))
             }
         
         # Save final summary
@@ -260,11 +336,15 @@ class TrainingLogger:
     
     def _save_training_summary(self) -> None:
         """Save intermediate training summary."""
-        if not self.episode_rewards:
+        episode_rewards = []
+        if self.env and hasattr(self.env, 'return_queue'):
+            episode_rewards = list(self.env.return_queue)
+        
+        if not episode_rewards:
             return
         
         summary = {
-            'episodes_completed': len(self.episode_rewards),
+            'episodes_completed': len(episode_rewards),
             'current_performance': self.get_recent_performance(50),  # Last 50 episodes
             'timestamp': datetime.now().isoformat()
         }
@@ -299,3 +379,45 @@ class TrainingLogger:
         
         with open(self.run_dir / "results.txt", 'w') as f:
             f.write('\n'.join(results))
+    
+    def _load_existing_logs(self) -> None:
+        """Load existing log files if they exist (for resuming training)."""
+        try:
+            # Load epsilon values
+            epsilon_file = self.run_dir / "epsilon_values.npy"
+            if epsilon_file.exists():
+                self.epsilon_values = np.load(epsilon_file).tolist()
+                print(f"Loaded {len(self.epsilon_values)} existing epsilon values")
+            
+            # Load learning rates
+            lr_file = self.run_dir / "learning_rates.npy"
+            if lr_file.exists():
+                self.learning_rates = np.load(lr_file).tolist()
+                print(f"Loaded {len(self.learning_rates)} existing learning rate values")
+            
+            # Load custom metrics
+            for npy_file in self.run_dir.glob("*.npy"):
+                if npy_file.name not in ["epsilon_values.npy", "learning_rates.npy", "episode_rewards.npy", "episode_lengths.npy", "training_errors.npy"]:
+                    metric_name = npy_file.stem
+                    try:
+                        values = np.load(npy_file).tolist()
+                        self.custom_metrics[metric_name] = values
+                        print(f"Loaded {len(values)} existing {metric_name} values")
+                    except Exception as e:
+                        print(f"Warning: Could not load {npy_file}: {e}")
+            
+            # Also check for JSON files for non-numeric metrics
+            for json_file in self.run_dir.glob("*.json"):
+                if json_file.name not in ["config.yaml", "training_summary.json", "training_progress.json"]:
+                    metric_name = json_file.stem
+                    try:
+                        with open(json_file, 'r') as f:
+                            values = json.load(f)
+                        if isinstance(values, list):  # Only load if it's a list of values
+                            self.custom_metrics[metric_name] = values
+                            print(f"Loaded {len(values)} existing {metric_name} values")
+                    except Exception as e:
+                        print(f"Warning: Could not load {json_file}: {e}")
+                        
+        except Exception as e:
+            print(f"Warning: Error loading existing logs: {e}")

@@ -7,6 +7,7 @@ import sys
 import os
 import time
 import yaml
+import json
 import numpy as np
 import gymnasium as gym
 from pathlib import Path
@@ -24,30 +25,47 @@ from utils.agent_factory import create_agent
 from utils.checkpoint_manager import CheckpointManager
 from utils.plotting_manager import PlottingManager
 from utils.training_logger import TrainingLogger
+from utils.session_summary import create_session_summary
 
 
-def setup_run_directory(config: dict, agent_name: str) -> Path:
+def setup_run_directory(config: dict, agent_name: str, resume_from: str = None) -> Path:
     """
-    Create unique run directory for this training session.
+    Create unique run directory for this training session or return existing one if resuming.
     
     Args:
         config: Training configuration
         agent_name: Name of the agent being trained
+        resume_from: Optional path to checkpoint to resume from
         
     Returns:
-        Path to the created run directory
+        Path to the run directory
     """
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_name = f"run_{timestamp}"
-    
-    run_dir = Path("experiments") / agent_name / run_name
-    run_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Save config for this run
-    with open(run_dir / "config.yaml", "w") as f:
-        yaml.dump(config, f, default_flow_style=False)
-    
-    return run_dir
+    if resume_from:
+        # Extract run directory from checkpoint path
+        checkpoint_path = Path(resume_from)
+        if checkpoint_path.is_file():
+            run_dir = checkpoint_path.parent.parent  # checkpoint file -> checkpoint dir -> run dir
+        else:
+            run_dir = checkpoint_path.parent  # checkpoint dir -> run dir
+        
+        # Update config for this resumed run (allow changing parameters like total episodes)
+        with open(run_dir / "config.yaml", "w") as f:
+            yaml.dump(config, f, default_flow_style=False)
+        
+        return run_dir
+    else:
+        # Create new run directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_name = f"run_{timestamp}"
+        
+        run_dir = Path("experiments") / agent_name / run_name
+        run_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save config for this run
+        with open(run_dir / "config.yaml", "w") as f:
+            yaml.dump(config, f, default_flow_style=False)
+        
+        return run_dir
 
 
 def train_agent(config_path: str, resume_from: str = None):
@@ -93,7 +111,7 @@ def train_agent(config_path: str, resume_from: str = None):
     agent = create_agent(agent_config, env)
     
     # Setup run directory
-    run_dir = setup_run_directory(config, agent_config["type"])
+    run_dir = setup_run_directory(config, agent_config["type"], resume_from)
     
     # Initialize managers
     checkpoint_manager = CheckpointManager(
@@ -113,25 +131,41 @@ def train_agent(config_path: str, resume_from: str = None):
     start_episode = 0
     if resume_from:
         start_episode = checkpoint_manager.load_checkpoint(resume_from, agent, env)
+        # Restore training logger state from checkpoint
+        training_logger.restore_from_checkpoint(checkpoint_manager)
         print(f"Resumed training from episode {start_episode}")
+        print(f"Training metrics restored: {training_logger.is_resuming()}")
     
     # Training parameters
     total_episodes = training_config["episodes"]
     
     # Plotting configuration
-    plot_interval = plotting_config.get("metrics_interval", 100)
-    milestone_episodes = plotting_config.get("trajectory_episodes", [100, 500, 1000, 2000, 5000])
+    metrics_interval = plotting_config['training_metrics'].get("interval", 500)
+    trajectories_interval = plotting_config['trajectories'].get("interval", 150)
     
     # Print training summary
-    print("Starting F16 Adaptive RL Training")
-    print("=" * 50)
-    print(f"Agent:           {agent_config['type']}")
-    print(f"Environment:     {env_config['name']}")
-    print(f"Total Episodes:  {total_episodes}")
-    print(f"Start Episode:   {start_episode}")
-    print(f"Results Dir:     {run_dir}")
-    print("=" * 50)
-    print()
+    if resume_from:
+        print("Resuming F16 Adaptive RL Training")
+        print("=" * 50)
+        print(f"Agent:           {agent_config['type']}")
+        print(f"Environment:     {env_config['name']}")
+        print(f"Total Episodes:  {total_episodes}")
+        print(f"Resume From:     Episode {start_episode}")
+        print(f"Episodes Left:   {total_episodes - start_episode}")
+        print(f"Resumed From:    {resume_from}")
+        print(f"Results Dir:     {run_dir} (continuing)")
+        print("=" * 50)
+        print()
+    else:
+        print("Starting F16 Adaptive RL Training")
+        print("=" * 50)
+        print(f"Agent:           {agent_config['type']}")
+        print(f"Environment:     {env_config['name']}")
+        print(f"Total Episodes:  {total_episodes}")
+        print(f"Start Episode:   {start_episode}")
+        print(f"Results Dir:     {run_dir}")
+        print("=" * 50)
+        print()
     
     # Training loop with profiling
     start_time = time.time()
@@ -143,6 +177,17 @@ def train_agent(config_path: str, resume_from: str = None):
     times_agent_update = []
     times_logging = []
     times_episode_total = []
+    
+    # Initialize episode variable to prevent UnboundLocalError
+    episode = start_episode - 1
+    
+    # Create initial plots if resuming to show continuity
+    if resume_from and start_episode > 0:
+        try:
+            plotting_manager.create_training_metrics_plot(start_episode - 1, env, training_logger, is_final=False)
+            print(f"Created resumption plot showing metrics up to episode {start_episode}")
+        except Exception as e:
+            print(f"Warning: Could not create resumption plot: {e}")
     
     try:
         for episode in tqdm(range(start_episode, total_episodes), 
@@ -158,13 +203,22 @@ def train_agent(config_path: str, resume_from: str = None):
                 times_reset.append(time.time() - reset_start)
             done = False
             
-            # Initialize trajectory storage for potential plotting
-            state_trajectory = []
-            action_trajectory = []
-            reference_trajectory = []
-            errors_trajectory = []
-            reward_trajectory = []
-            info_trajectory = []
+            # Only record trajectories for specific milestone episodes or when explicitly needed
+            record_trajectory = (
+                (episode + 1) % trajectories_interval == 0 and 
+                plotting_config.get('enabled', True) and 
+                plotting_config['trajectories'].get('save_data', True)
+            )
+            
+            if record_trajectory:
+                # Pre-allocate arrays for better performance
+                max_episode_steps = training_config.get('max_steps', 3000)
+                state_trajectory = []
+                action_trajectory = []
+                reference_trajectory = []
+                errors_trajectory = []
+                reward_trajectory = []
+                step_count = 0
             
             # Episode loop
             while not done:
@@ -187,13 +241,15 @@ def train_agent(config_path: str, resume_from: str = None):
                 if episode < 5:
                     times_agent_update.append(time.time() - update_start)
                 
-                # Record trajectories for potential plotting
-                state_trajectory.append(env.env.state)
-                action_trajectory.append(action)
-                reference_trajectory.append(info['reference'])
-                errors_trajectory.append(info['tracking_error'])
-                reward_trajectory.append(reward)
-                info_trajectory.append(info)
+                # Record trajectories only when needed for plotting (optimized)
+                if record_trajectory:
+                    # Use copy to avoid reference issues and optimize access
+                    state_trajectory.append(obs.copy() if hasattr(obs, 'copy') else obs)
+                    action_trajectory.append(action)
+                    reference_trajectory.append(info.get('reference', None))
+                    errors_trajectory.append(info.get('tracking_error', None))
+                    reward_trajectory.append(reward)
+                    step_count += 1
                 
                 # Move to next state
                 obs = next_obs
@@ -209,15 +265,15 @@ def train_agent(config_path: str, resume_from: str = None):
             if checkpoint_manager.should_save_checkpoint(episode):
                 checkpoint_manager.save_checkpoint(episode, agent, env, training_logger)
             
-            # Create training metrics plots every 100 episodes or on first episode
-            if (episode + 1) % plot_interval == 0 or episode == 0:
+            # Create training metrics plots
+            if (episode + 1) % metrics_interval == 0 or episode == 0:
                 plotting_manager.create_training_metrics_plot(episode, env, training_logger)
             
-            # Create trajectory plots for specific milestone episodes
-            if (episode + 1) in milestone_episodes:
+            # Create trajectory plots (only when data was recorded)
+            if record_trajectory:
                 states = np.array(state_trajectory)
                 actions = np.array(action_trajectory)
-                save_path = plotting_manager.run_dir / f"trajectory_ep{episode + 1}.png"
+                save_path = plotting_manager.get_trajectory_path(episode)
                 plotting_manager.plot_test_episode_trajectory(
                     states=states,
                     actions=actions,
@@ -246,15 +302,22 @@ def train_agent(config_path: str, resume_from: str = None):
         # Always save final checkpoint and plots
         print("\nSaving final results...")
         
-        # Final checkpoint
-        checkpoint_manager.save_checkpoint(episode, agent, env, training_logger, is_final=True)
+        # Final checkpoint (ensure episode is valid)
+        final_episode = max(episode, start_episode)
+        checkpoint_manager.save_checkpoint(final_episode, agent, env, training_logger, is_final=True)
         
         # Final plots
-        plotting_manager.create_training_metrics_plot(episode, env, training_logger, is_final=True)
+        plotting_manager.create_training_metrics_plot(final_episode, env, training_logger, is_final=True)
         
         # Training summary
         training_time = time.time() - start_time
-        training_logger.save_final_summary(episode, training_time)
+        training_logger.save_final_summary(final_episode, training_time)
+        
+        # Create session summary
+        create_session_summary(
+            run_dir, config, final_episode, start_episode, 
+            training_time, resume_from, env, agent, training_logger
+        )
         
         # Performance analysis
         if times_episode_total and len(times_episode_total) > 0:
@@ -272,9 +335,16 @@ def train_agent(config_path: str, resume_from: str = None):
             print(f"Average logging time: {np.mean(times_logging)*1000:.2f}ms")
         
         print("\nTraining Complete!")
-        print(f"Total Episodes: {episode + 1}")
-        print(f"Training Time:  {training_time/60:.1f} minutes")
-        print(f"Results saved in: {run_dir}")
+        if resume_from:
+            print(f"Total Episodes Completed: {max(episode + 1, start_episode)}")
+            print(f"Episodes in This Session: {max(episode + 1 - start_episode, 0)}")
+            print(f"Session Training Time: {training_time/60:.1f} minutes")
+            print(f"Cumulative results saved in: {run_dir}")
+        else:
+            print(f"Total Episodes: {max(episode + 1, start_episode)}")
+            print(f"Training Time:  {training_time/60:.1f} minutes")
+            print(f"Results saved in: {run_dir}")
+
 
 
 def main():

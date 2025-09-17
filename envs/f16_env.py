@@ -3,7 +3,11 @@ from gymnasium import spaces
 import numpy as np
 from typing import Optional
 from data.LinearF16SS import B_f1
-from utils.reference_utils import cosine_smooth, step_reference, generate_cos_step_sequence
+from utils.reference_utils import (
+    cosine_smooth,
+    step_reference,
+    generate_cos_step_sequence,
+)
 
 
 class LinearModelF16(gym.Env):
@@ -57,17 +61,24 @@ class LinearModelF16(gym.Env):
         )
 
         # Determine observation structure
-        self.state_indices_for_obs = state_indices_for_obs or list(range(self.state_dim))
+        self.state_indices_for_obs = state_indices_for_obs or list(
+            range(self.state_dim)
+        )
         self.reference_config = reference_config or {}
-        self.tracking_indices = list(self.reference_config.keys()) if self.reference_config else []
-        
+        self.tracking_indices = (
+            list(self.reference_config.keys()) if self.reference_config else []
+        )
+
         # Calculate actual observation dimensions
         self.n_state_obs = len(self.state_indices_for_obs)
         self.n_error_obs = len(self.tracking_indices)
         self.total_obs_dim = self.n_state_obs + self.n_error_obs
-        
+
         # Validate and construct observation bounds
-        if len(self.obs_low) != self.total_obs_dim or len(self.obs_high) != self.total_obs_dim:
+        if (
+            len(self.obs_low) != self.total_obs_dim
+            or len(self.obs_high) != self.total_obs_dim
+        ):
             raise ValueError(
                 f"Observation bounds length mismatch: expected {self.total_obs_dim} elements "
                 f"({self.n_state_obs} state + {self.n_error_obs} error components), "
@@ -97,18 +108,20 @@ class LinearModelF16(gym.Env):
         """
         # Pre-allocate observation array for optimal performance
         observation = np.empty(self.total_obs_dim, dtype=np.float64)
-        
+
         # Fill state components (vectorized indexing)
-        observation[:self.n_state_obs] = self.state[self.state_indices_for_obs]
-        
+        observation[: self.n_state_obs] = self.state[self.state_indices_for_obs]
+
         # Fill tracking errors if present
         if self.n_error_obs > 0:
             # Use cached reference if available, otherwise compute it
-            ref = getattr(self, '_cached_reference', None)
+            ref = getattr(self, "_cached_reference", None)
             if ref is None:
                 ref = self._get_reference()
-            observation[self.n_state_obs:] = ref[self.tracking_indices] - self.state[self.tracking_indices]
-        
+            observation[self.n_state_obs :] = (
+                ref[self.tracking_indices] - self.state[self.tracking_indices]
+            )
+
         return observation
 
     def _get_info(self) -> dict:
@@ -119,12 +132,14 @@ class LinearModelF16(gym.Env):
             dict: Information about current environment state.
         """
         # Use cached reference if available, otherwise compute it
-        ref = getattr(self, '_cached_reference', None)
+        ref = getattr(self, "_cached_reference", None)
         if ref is None:
             ref = self._get_reference()
         # Vectorized tracking error calculation using pre-computed indices
         if self.n_error_obs > 0:
-            tracking_error = ref[self.tracking_indices] - self.state[self.tracking_indices]
+            tracking_error = (
+                ref[self.tracking_indices] - self.state[self.tracking_indices]
+            )
         else:
             tracking_error = np.array([], dtype=np.float64)
 
@@ -150,20 +165,22 @@ class LinearModelF16(gym.Env):
     def _get_info_optimized(self, observation: np.ndarray, reward: float) -> dict:
         """
         Get environment information dictionary (optimized to avoid redundant calculations).
-        
+
         Args:
             observation: Pre-computed observation
             reward: Pre-computed reward
-            
+
         Returns:
             dict: Information about current environment state.
         """
         # Use cached reference (should already be available from step)
-        ref = getattr(self, '_cached_reference', self._get_reference())
-        
+        ref = getattr(self, "_cached_reference", self._get_reference())
+
         # Vectorized tracking error calculation using pre-computed indices
         if self.n_error_obs > 0:
-            tracking_error = ref[self.tracking_indices] - self.state[self.tracking_indices]
+            tracking_error = (
+                ref[self.tracking_indices] - self.state[self.tracking_indices]
+            )
         else:
             tracking_error = np.array([], dtype=np.float64)
 
@@ -173,17 +190,19 @@ class LinearModelF16(gym.Env):
             "observation": observation,  # Use pre-computed observation
             "reference": ref,  # CRITICAL: Keep this for plotting compatibility
             "tracking_error": tracking_error,
-            "tracking_mse": np.mean(tracking_error**2) if len(tracking_error) > 0 else 0.0,
+            "tracking_mse": np.mean(tracking_error**2)
+            if len(tracking_error) > 0
+            else 0.0,
             "reward": reward,  # Use pre-computed reward
         }
-        
+
         # Include last action if available
         if self.prev_action is not None:
             info["last_action"] = self.prev_action  # Remove .copy() for speed
 
         return info
 
-    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> tuple[np.ndarray, dict]:
+    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
         super().reset(seed=seed)
         self.state = np.zeros(self.state_dim, dtype=np.float64)
         self.current_step = 0
@@ -191,23 +210,26 @@ class LinearModelF16(gym.Env):
         self.prev_action = None
 
         if options:
-            fault_type = options.get('fault_type', 'null')
+            fault_type = options.get("fault_type", "null")
             if fault_type == "elevator_loss":
                 self.B = B_f1
             elif fault_type is None:
                 pass
             else:
-                print(f'env.reset() error: fault {fault_type} not recognised')
+                print(f"env.reset() error: fault {fault_type} not recognised")
 
-        # --- generate references *before* first observation
-        # Precompute cos_step references as matrix for efficiency
+        # --- generate references before first observation
         self.cos_step_matrix = None
+        self.sin_matrix = None
         if self.reference_config:
             self.reference = {}
-            cos_step_indices = []
-            cos_step_sequences = []
-            
-            for idx, cfg in self.reference_config.items():
+            cos_step_indices, cos_step_sequences = [], []
+            sin_indices, sin_sequences = [], []
+
+            t = np.arange(self.max_steps) * self.dt
+
+            for idx_str, cfg in self.reference_config.items():
+                idx = int(idx_str)  # Convert string key to integer index
                 if cfg["type"] == "cos_step":
                     time_seq, ref_seq = generate_cos_step_sequence(
                         cfg,
@@ -215,31 +237,46 @@ class LinearModelF16(gym.Env):
                         dt=self.dt,
                         seed=cfg.get("seed", None),
                     )
-                    # Store for backward compatibility with existing code
-                    self.reference[idx] = {"t": time_seq, "y": ref_seq}
+                    self.reference[idx_str] = {"t": time_seq, "y": ref_seq}
                     cos_step_indices.append(idx)
                     cos_step_sequences.append(ref_seq)
+
+                elif cfg["type"] == "sin":
+                    omega = 2 * np.pi / cfg["T"]
+                    ref_seq = cfg["A"] * np.sin(omega * t + cfg.get("phi", 0.0))
+                    self.reference[idx_str] = {"t": t, "y": ref_seq}
+                    sin_indices.append(idx)
+                    sin_sequences.append(ref_seq)
+
                 else:
-                    self.reference[idx] = None
-            
-            # Create precomputed matrix for cos_step references
+                    self.reference[idx_str] = None
+
+            # Pack cos_step sequences
             if cos_step_indices:
-                # Initialize matrix with None (object dtype)
-                self.cos_step_matrix = np.full((self.state_dim, self.max_steps), None, dtype=object)
-                # Fill in the cos_step sequences for tracked states
+                self.cos_step_matrix = np.full(
+                    (self.state_dim, self.max_steps), np.nan, dtype=np.float64
+                )
                 for i, state_idx in enumerate(cos_step_indices):
-                    # Ensure we don't exceed matrix bounds
                     seq_len = min(len(cos_step_sequences[i]), self.max_steps)
-                    self.cos_step_matrix[state_idx, :seq_len] = cos_step_sequences[i][:seq_len]
+                    self.cos_step_matrix[state_idx, :seq_len] = cos_step_sequences[i][
+                        :seq_len
+                    ]
+
+            # Pack sin sequences
+            if sin_indices:
+                self.sin_matrix = np.full(
+                    (self.state_dim, self.max_steps), np.nan, dtype=np.float64
+                )
+                for i, state_idx in enumerate(sin_indices):
+                    seq_len = min(len(sin_sequences[i]), self.max_steps)
+                    self.sin_matrix[state_idx, :seq_len] = sin_sequences[i][:seq_len]
+
         else:
             self.reference = {}
 
-        # Now safe to call _get_obs (uses self.reference)
         observation = self._get_obs()
         info = self._get_info()
-
         return observation, info
-
 
     def _get_reference(self) -> np.ndarray:
         """
@@ -251,37 +288,58 @@ class LinearModelF16(gym.Env):
             - cos_step: cosine-smoothed step function with discrete amplitude levels (precomputed)
 
         Returns:
-            np.ndarray: Reference values for all states. 
+            np.ndarray: Reference values for all states.
                         Untracked states are None.
         """
-        ref = np.full(self.state_dim, None, dtype=object)  # allow None entries
-        t = self.current_step * self.dt
+        ref = np.full(self.state_dim, None, dtype=object)
+        step = self.current_step
 
-        for idx, cfg in self.reference_config.items():
+        for idx_str, cfg in self.reference_config.items():
+            idx = int(idx_str)  # Convert string key to integer index
             if cfg["type"] == "sin":
-                omega = 2 * np.pi / cfg["T"]
-                ref[idx] = cfg["A"] * np.sin(omega * t + cfg.get("phi", 0.0))
+                if self.sin_matrix is not None and step < self.sin_matrix.shape[1]:
+                    value = self.sin_matrix[idx, step]
+                    if not np.isnan(value):
+                        ref[idx] = value
+                    else:
+                        seq_t = self.reference[idx_str]["t"]
+                        seq_y = self.reference[idx_str]["y"]
+                        time_idx = min(step, len(seq_t) - 1)
+                        ref[idx] = seq_y[time_idx]
+                else:
+                    seq_t = self.reference[idx_str]["t"]
+                    seq_y = self.reference[idx_str]["y"]
+                    time_idx = min(step, len(seq_t) - 1)
+                    ref[idx] = seq_y[time_idx]
 
             elif cfg["type"] == "constant":
                 ref[idx] = cfg["value"]
 
             elif cfg["type"] == "cos_step":
-                # Use precomputed matrix for efficiency
-                if self.cos_step_matrix is not None and self.current_step < self.cos_step_matrix.shape[1]:
-                    ref[idx] = self.cos_step_matrix[idx, self.current_step]
+                if (
+                    self.cos_step_matrix is not None
+                    and step < self.cos_step_matrix.shape[1]
+                ):
+                    value = self.cos_step_matrix[idx, step]
+                    if not np.isnan(value):
+                        ref[idx] = value
+                    else:
+                        seq_t = self.reference[idx_str]["t"]
+                        seq_y = self.reference[idx_str]["y"]
+                        time_idx = min(step, len(seq_t) - 1)
+                        ref[idx] = seq_y[time_idx]
                 else:
-                    # Fallback to original method if matrix not available
-                    seq_t = self.reference[idx]["t"]
-                    seq_y = self.reference[idx]["y"]
-                    time_idx = min(int(t / self.dt), len(seq_t) - 1)
+                    seq_t = self.reference[idx_str]["t"]
+                    seq_y = self.reference[idx_str]["y"]
+                    time_idx = min(step, len(seq_t) - 1)
                     ref[idx] = seq_y[time_idx]
 
             else:
-                raise ValueError(f"Unknown reference type '{cfg['type']}' for state {idx}")
+                raise ValueError(
+                    f"Unknown reference type '{cfg['type']}' for state {idx}"
+                )
 
         return ref
-
-
 
     def _get_reward(
         self,
@@ -303,7 +361,7 @@ class LinearModelF16(gym.Env):
             float: Computed reward value.
         """
         # Use cached reference if available, otherwise compute it
-        ref = getattr(self, '_cached_reference', None)
+        ref = getattr(self, "_cached_reference", None)
         if ref is None:
             ref = self._get_reference()
 
@@ -323,7 +381,7 @@ class LinearModelF16(gym.Env):
                 # Use a reasonable error bound (e.g., ±2.0 for most tracking tasks)
                 # This could be made configurable in the future
                 error_range = 4.0  # Assuming ±2.0 error range per tracked state
-                Emax += error_range ** 2
+                Emax += error_range**2
 
             # Shifted reward clipped at 0
             reward = max(0.0, Emax - squared_error)
@@ -417,6 +475,3 @@ class LinearModelF16(gym.Env):
     def close(self):
         """Clean up environment resources."""
         pass
-
-
-

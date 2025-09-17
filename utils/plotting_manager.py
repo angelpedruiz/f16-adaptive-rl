@@ -21,11 +21,36 @@ class PlottingManager:
         self.rolling_window = config.get("rolling_window", 50)
         self.dpi = config.get("dpi", 150)
         self.style = config.get("style", "default")
+        
+        # Create organized plot directories
+        self.plots_dir = self.run_dir / "plots"
+        self.training_metrics_dir = self.plots_dir / "training_metrics"
+        self.trajectories_dir = self.plots_dir / "trajectories"
+        
+        # Ensure directories exist
+        self.training_metrics_dir.mkdir(parents=True, exist_ok=True)
+        self.trajectories_dir.mkdir(parents=True, exist_ok=True)
+        
         if self.style != "default":
             try:
                 plt.style.use(self.style)
             except OSError:
                 print(f"Warning: Style '{self.style}' not found, using default.")
+
+    def get_training_metrics_path(self, episode: int, is_final: bool = False) -> Path:
+        """Get the organized path for training metrics plots."""
+        suffix = "_final" if is_final else ""
+        return self.training_metrics_dir / f"training_metrics_ep{episode + 1}{suffix}.png"
+    
+    def get_trajectory_path(self, episode: int = None, name: str = None) -> Path:
+        """Get the organized path for trajectory plots."""
+        if name:
+            filename = f"{name}.png"
+        elif episode is not None:
+            filename = f"trajectory_ep{episode + 1}.png"
+        else:
+            filename = "trajectory_test.png"
+        return self.trajectories_dir / filename
 
     @staticmethod
     def _moving_average(arr, window, mode="valid"):
@@ -35,6 +60,7 @@ class PlottingManager:
         """
         Create training metrics plot with episode rewards, lengths, and training errors
         in a single row of three subplots, using rolling average window.
+        Shows all data including from resumed checkpoints for continuity.
         
         Args:
             episode: Current episode number
@@ -67,35 +93,44 @@ class PlottingManager:
         fig.suptitle(f"Training Metrics (Rolling Window = {self.rolling_window})", fontsize=14)
 
         # Plot 1: Episode rewards
-        if rewards:
+        if rewards and len(rewards) > 0:
             axs[0].set_title("Episode rewards")
             if len(rewards) >= self.rolling_window:
                 reward_moving_average = self._moving_average(rewards, self.rolling_window, "valid")
                 axs[0].plot(range(len(reward_moving_average)), reward_moving_average)
             else:
                 axs[0].plot(range(len(rewards)), rewards)
+        else:
+            axs[0].set_title("Episode rewards (No data)")
+            axs[0].text(0.5, 0.5, 'No data available', transform=axs[0].transAxes, ha='center', va='center')
 
         # Plot 2: Episode lengths
-        if episode_lengths:
+        if episode_lengths and len(episode_lengths) > 0:
             axs[1].set_title("Episode lengths")
             if len(episode_lengths) >= self.rolling_window:
                 length_moving_average = self._moving_average(episode_lengths, self.rolling_window, "valid")
                 axs[1].plot(range(len(length_moving_average)), length_moving_average)
             else:
                 axs[1].plot(range(len(episode_lengths)), episode_lengths)
+        else:
+            axs[1].set_title("Episode lengths (No data)")
+            axs[1].text(0.5, 0.5, 'No data available', transform=axs[1].transAxes, ha='center', va='center')
 
         # Plot 3: Training error
-        if training_errors:
+        if training_errors and len(training_errors) > 0:
             axs[2].set_title("Training Error")
             if len(training_errors) >= self.rolling_window:
                 training_error_moving_average = self._moving_average(training_errors, self.rolling_window, "same")
                 axs[2].plot(range(len(training_error_moving_average)), training_error_moving_average)
             else:
                 axs[2].plot(range(len(training_errors)), training_errors)
+        else:
+            axs[2].set_title("Training Error (No data)")
+            axs[2].text(0.5, 0.5, 'No data available', transform=axs[2].transAxes, ha='center', va='center')
 
         plt.tight_layout()
-        suffix = "_final" if is_final else ""
-        plt.savefig(self.run_dir / f"training_metrics_ep{episode + 1}{suffix}.png", dpi=self.dpi, bbox_inches='tight')
+        save_path = self.get_training_metrics_path(episode, is_final)
+        plt.savefig(save_path, dpi=self.dpi, bbox_inches='tight')
         plt.close()
 
     def plot_test_episode_trajectory(self, states: np.ndarray, actions: np.ndarray,
@@ -227,7 +262,14 @@ class PlottingManager:
         plt.subplots_adjust(top=0.88)
 
         if save_path is not None:
-            plt.savefig(save_path, facecolor="black", dpi=self.dpi)
+            # If save_path is provided, use it; otherwise save to trajectories directory
+            if isinstance(save_path, str) or isinstance(save_path, Path):
+                final_save_path = Path(save_path)
+                # Ensure parent directory exists
+                final_save_path.parent.mkdir(parents=True, exist_ok=True)
+            else:
+                final_save_path = self.get_trajectory_path(episode_num)
+            plt.savefig(final_save_path, facecolor="black", dpi=self.dpi)
             plt.close()
         else:
             plt.show()

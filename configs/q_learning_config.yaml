@@ -24,7 +24,7 @@ environment:
   name: "f16"                  # Environment name
   
   # Environment parameters
-  max_steps: 3000              # Maximum steps per episode
+  max_steps: 2000              # Maximum steps per episode
   dt: 0.01                     # Time step size
   
   # State configuration  
@@ -33,53 +33,62 @@ environment:
   # Action and observation bounds
   action_low: [0, -22.5]       # Action space lower bounds
   action_high: [0, 27.0]       # Action space upper bounds
-  obs_low: [-2.0, -1.0]        # Observation bounds
-  obs_high: [2.0, 1.0]         # Observation bounds
+  obs_low: [-1.5, -2.5]        # Observation bounds
+  obs_high: [1.5, 2.5]         # Observation bounds
   
   # Reference signal configuration
+  # Change 'type' to switch between: "cos_step", "sin", "constant"
   reference_config:
     1:                         # State index for reference (theta)
-      type: "cos_step"         # Reference type
+      type: "cos_step"    # Reference type: change to "sin" or "constant" as needed
       
-      # Cosine step reference parameters
+      # COS_STEP parameters (used when type: "cos_step")
       amplitude:
-        min: -20.0             # Min amplitude (degrees)  
-        max: 20.0              # Max amplitude (degrees)
+        min: -20.0             # Min amplitude (radians)  
+        max: 20.0              # Max amplitude (radians)
         n_levels: 15           # Number of amplitude levels
-      
       step_duration:
-        min: 5.0               # Min step duration
-        max: 5.0               # Max step duration
-        n_levels: 1
-      
+        min: 5.0               # Min step duration (seconds)
+        max: 5.0               # Max step duration (seconds)
+        n_levels: 1            # Number of duration levels
       transition_duration:
-        min: 3.0               # Min transition duration
-        max: 5.0               # Max transition duration  
-        n_levels: 3
+        min: 3.0               # Min transition duration (seconds)
+        max: 5.0               # Max transition duration (seconds)
+        n_levels: 3            # Number of transition duration levels
+      seed: null               # Random seed for sequence generation (optional)
+      
+      # SIN parameters (used when type: "sin")
+      A: 0.35                  # Amplitude (radians)
+      T: 5.0                 # Period (seconds)
+      phi: 0.0                 # Phase offset (radians, optional)
+      
+      # CONSTANT parameters (used when type: "constant")
+      value: 10.0              # Constant value (radians)
 
 training:
   episodes: 500            # Total training episodes
   seed: 42                     # Random seed
-  log_frequency: 100          # Log every N episodes
-  detailed_logging: true       # Enable detailed logging
+  log_frequency: 1000          # Log every N episodes
+  detailed_logging: true      # Enable detailed logging (disabled for performance)
 
 checkpointing:
-  interval: 100              # Checkpoint every N episodes
-  keep_last_n: 3              # Keep last N checkpoints
-  save_best: true             # Save best checkpoint
-  resume_from: null           # Resume checkpoint path
+  interval: 10000              # Checkpoint every N episodes
+  keep_last_n: 3               # Keep last N checkpoints
+  save_best: false              # Save best checkpoint
+  resume_from: null             # Resume checkpoint path
 
 plotting:
-  enabled: true               # Enable/disable all plotting (set to false for faster training)
+  enabled: true              # Enable/disable all plotting (set to false for faster training)
   
   # Training metrics
   training_metrics:
-    interval: 200            # Plot every N episodes
-    rolling_window: 10       # Rolling average window
+    interval: 10000           # Plot every N episodes
+    rolling_window: 1000       # Rolling average window
     save_individual: true      # Save individual plots
   
   # Trajectory episodes
   trajectories:
+    interval: 10000            # Interval for saving trajectory data
     episodes: [1, 30000, 60000]  # Episodes to plot trajectories
     save_data: true            # Save trajectory data
   

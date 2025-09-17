@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.pyplot as plt
 import numpy as np
 from functools import partial
+from pathlib import Path
 
 
 def plot_best_action(agent, state_space):
@@ -105,6 +106,9 @@ def reward_length_learning_error_plot(env, agent, rolling_length=500, save_path=
     plt.tight_layout()
 
     if save_path is not None:
+        # Ensure the directory exists if save_path is provided
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
         plt.savefig(save_path)
         plt.close()
     else:
@@ -466,5 +470,8 @@ def plot_training_milestone_from_data(states, actions, references, errors, rewar
 
     plt.tight_layout()
     plt.subplots_adjust(top=0.88)
+    # Ensure the directory exists
+    save_path = Path(save_path)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(save_path, facecolor="black", dpi=150)
     plt.close(fig)
