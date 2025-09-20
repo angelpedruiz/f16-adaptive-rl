@@ -9,45 +9,71 @@ class Discretizer:
 
 
 class UniformTileCoding(Discretizer):
-    def __init__(self, space: Box, bins: tuple):
+    def __init__(self, space: Box, bins: tuple, return_tuple: bool = True):
+        """
+        Parameters
+        ----------
+        space : gymnasium.spaces.Box
+            Continuous observation space.
+        bins : tuple[int]
+            Number of bins per dimension.
+        return_tuple : bool, default=True
+            Whether to return a tuple (hashable, slower) or a NumPy array (faster).
+        """
         super().__init__(space)
         self.bins = np.array(bins, dtype=int)
-        self.fixed_dims = self.bins == 1  # Dimensions with only 1 bin are fixed
+        self.fixed_dims = self.bins == 1
+        self.return_tuple = return_tuple
 
-        # Avoid division by zero: bin width is arbitrary for fixed dims
+        # Compute bin widths
         self.bin_widths = np.empty_like(self.lower_bounds)
         self.bin_widths[~self.fixed_dims] = (
-            self.upper_bounds[~self.fixed_dims] - self.lower_bounds[~self.fixed_dims]
-        ) / self.bins[~self.fixed_dims]
-        self.bin_widths[self.fixed_dims] = 1.0  # dummy width for fixed dims
+            (self.upper_bounds[~self.fixed_dims] - self.lower_bounds[~self.fixed_dims])
+            / self.bins[~self.fixed_dims]
+        )
+        self.bin_widths[self.fixed_dims] = 1.0  # dummy width
+
+        # Precompute inverse widths for faster multiply instead of divide
+        self.inv_bin_widths = np.zeros_like(self.bin_widths)
+        self.inv_bin_widths[~self.fixed_dims] = 1.0 / self.bin_widths[~self.fixed_dims]
 
         self.space = MultiDiscrete(self.bins)
 
-    def discretize(self, obs: tuple) -> tuple:
-        obs = np.array(obs, dtype=float)
-        obs = np.clip(obs, self.lower_bounds, self.upper_bounds - 1e-8)
+    def discretize(self, obs) -> tuple | np.ndarray:
+        """
+        Map continuous observation to discrete indices.
+        Accepts tuple, list, or ndarray as input.
+        """
+        # Ensure obs is a writable NumPy array
+        obs_arr = np.asarray(obs, dtype=float)
 
-        indices = np.zeros_like(obs, dtype=int)
-        variable_dims = ~self.fixed_dims
-        indices[variable_dims] = (
-            (obs[variable_dims] - self.lower_bounds[variable_dims])
-            / self.bin_widths[variable_dims]
-        ).astype(int)
+        # Clip safely (always creates a new array if needed)
+        obs_arr = np.clip(obs_arr, self.lower_bounds, self.upper_bounds - 1e-8)
 
-        # Fixed dims (bins=1) always map to index 0
-        return tuple(indices)
+        # Compute indices
+        indices = ((obs_arr - self.lower_bounds) * self.inv_bin_widths).astype(int)
 
-    def undiscretize(self, indexes: tuple) -> tuple:
-        indexes = np.array(indexes, dtype=int)
-        values = self.lower_bounds + (indexes + 0.5) * self.bin_widths
+        # Force fixed dims to zero
+        if np.any(self.fixed_dims):
+            indices[self.fixed_dims] = 0
+
+        return tuple(indices) if self.return_tuple else indices
+
+    def undiscretize(self, indexes) -> tuple | np.ndarray:
+        """
+        Map discrete indices back to approximate continuous values.
+        Accepts tuple, list, or ndarray as input.
+        """
+        indexes_arr = np.asarray(indexes, dtype=int)
+        values = self.lower_bounds + (indexes_arr + 0.5) * self.bin_widths
         values[self.fixed_dims] = self.lower_bounds[self.fixed_dims]
-        return tuple(values)
-    
+        return tuple(values) if self.return_tuple else values
+
     def get_params(self):
         return {
             "bins": self.bins.tolist(),
             "low": self.lower_bounds.tolist(),
-            "high": self.upper_bounds.tolist()
+            "high": self.upper_bounds.tolist(),
         }
 
     def set_params(self, params):
@@ -61,6 +87,8 @@ class UniformTileCoding(Discretizer):
             self.upper_bounds[~self.fixed_dims] - self.lower_bounds[~self.fixed_dims]
         ) / self.bins[~self.fixed_dims]
         self.bin_widths[self.fixed_dims] = 1.0
+
+        self.inv_bin_widths = np.zeros_like(self.bin_widths)
+        self.inv_bin_widths[~self.fixed_dims] = 1.0 / self.bin_widths[~self.fixed_dims]
+
         self.space = MultiDiscrete(self.bins)
-
-

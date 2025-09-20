@@ -21,6 +21,7 @@ class ActorNet(nn.Module):
             x = F.relu(layer(x))
         action = torch.tanh(self.out(x)) * self.act_limit
         return action
+    
 
 
 class CriticNet(nn.Module):

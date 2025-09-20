@@ -5,20 +5,20 @@ agent:
   type: "q_learning"
   
   # Learning parameters
-  learning_rate: 0.4           # Q-learning update rate
+  learning_rate: 0.1           # Q-learning update rate
   initial_epsilon: 1.0         # Starting exploration rate
-  final_epsilon: 0.1           # Final exploration rate
-  epsilon_decay: null          # Decay rate (auto-calculated if null)
-  discount_factor: 0.95        # Reward discount factor
+  final_epsilon: 0.05           # Final exploration rate
+  epsilon_decay: 2.0e-05          # Decay rate (auto-calculated if null)
+  discount_factor: 0.99        # Reward discount factor
   
   # Discretization settings
   obs_discretizer:
     type: "uniform_tile_coding"
-    bins: [10, 10]  # Bins per observation dimension (1 state + 1 error = 2 dims)
+    bins: [20, 20]  # Bins per observation dimension (1 state + 1 error = 2 dims)
   
   action_discretizer:
     type: "uniform_tile_coding"  
-    bins: [1, 10]                # Bins per action dimension
+    bins: [1, 20]                # Bins per action dimension
 
 environment:
   name: "f16"                  # Environment name
@@ -40,12 +40,12 @@ environment:
   # Change 'type' to switch between: "cos_step", "sin", "constant"
   reference_config:
     1:                         # State index for reference (theta)
-      type: "cos_step"    # Reference type: change to "sin" or "constant" as needed
+      type: "sin"    # Reference type: change to "sin" or "constant" as needed
       
       # COS_STEP parameters (used when type: "cos_step")
       amplitude:
-        min: -20.0             # Min amplitude (radians)  
-        max: 20.0              # Max amplitude (radians)
+        min: -0.35             # Min amplitude (radians)  
+        max: 0.35             # Max amplitude (radians)
         n_levels: 15           # Number of amplitude levels
       step_duration:
         min: 5.0               # Min step duration (seconds)
@@ -66,13 +66,13 @@ environment:
       value: 10.0              # Constant value (radians)
 
 training:
-  episodes: 500            # Total training episodes
+  episodes: 10000            # Total training episodes
   seed: 42                     # Random seed
   log_frequency: 1000          # Log every N episodes
-  detailed_logging: true      # Enable detailed logging (disabled for performance)
+  detailed_logging: true      # Enable detailed logging
 
 checkpointing:
-  interval: 10000              # Checkpoint every N episodes
+  interval: 1000              # Checkpoint every N episodes
   keep_last_n: 3               # Keep last N checkpoints
   save_best: false              # Save best checkpoint
   resume_from: null             # Resume checkpoint path
@@ -82,13 +82,13 @@ plotting:
   
   # Training metrics
   training_metrics:
-    interval: 10000           # Plot every N episodes
+    interval: 1000           # Plot every N episodes
     rolling_window: 1000       # Rolling average window
     save_individual: true      # Save individual plots
   
   # Trajectory episodes
   trajectories:
-    interval: 10000            # Interval for saving trajectory data
+    interval: 1000            # Interval for saving trajectory data
     episodes: [1, 30000, 60000]  # Episodes to plot trajectories
     save_data: true            # Save trajectory data
   

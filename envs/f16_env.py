@@ -1,10 +1,12 @@
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
+import time
 from typing import Optional
 from data.LinearF16SS import B_f1
 from utils.reference_utils import (
     cosine_smooth,
+    generate_sin_sequence,
     step_reference,
     generate_cos_step_sequence,
 )
@@ -208,7 +210,8 @@ class LinearModelF16(gym.Env):
         self.current_step = 0
         self.terminated = False
         self.prev_action = None
-
+    
+        
         if options:
             fault_type = options.get("fault_type", "null")
             if fault_type == "elevator_loss":
@@ -242,9 +245,12 @@ class LinearModelF16(gym.Env):
                     cos_step_sequences.append(ref_seq)
 
                 elif cfg["type"] == "sin":
-                    omega = 2 * np.pi / cfg["T"]
-                    ref_seq = cfg["A"] * np.sin(omega * t + cfg.get("phi", 0.0))
-                    self.reference[idx_str] = {"t": t, "y": ref_seq}
+                    time_seq, ref_seq = generate_sin_sequence(
+                        cfg,
+                        max_time=self.max_steps * self.dt,
+                        dt=self.dt,
+                    )
+                    self.reference[idx_str] = {"t": time_seq, "y": ref_seq}
                     sin_indices.append(idx)
                     sin_sequences.append(ref_seq)
 
@@ -289,9 +295,9 @@ class LinearModelF16(gym.Env):
 
         Returns:
             np.ndarray: Reference values for all states.
-                        Untracked states are None.
+                        Untracked states are NaN.
         """
-        ref = np.full(self.state_dim, None, dtype=object)
+        ref = np.full(self.state_dim, np.nan, dtype=np.float64)
         step = self.current_step
 
         for idx_str, cfg in self.reference_config.items():
@@ -366,10 +372,10 @@ class LinearModelF16(gym.Env):
             ref = self._get_reference()
 
         if self.n_error_obs > 0:
-            # Only compute tracking error for states with non-None references
+            # Only compute tracking error for states with non-NaN references
             tracking_error = []
             for idx in self.tracking_indices:
-                if ref[idx] is not None:
+                if not np.isnan(ref[idx]):
                     tracking_error.append(ref[idx] - state[idx])
             tracking_error = np.array(tracking_error, dtype=np.float64)
             squared_error = np.sum(tracking_error**2)

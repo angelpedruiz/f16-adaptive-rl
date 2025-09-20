@@ -18,7 +18,7 @@ class PlottingManager:
     def __init__(self, run_dir: Path, config: Dict[str, Any]):
         self.run_dir = Path(run_dir)
         self.enabled = config.get("enabled", True)
-        self.rolling_window = config.get("rolling_window", 50)
+        self.rolling_window = config['training_metrics'].get("rolling_window", 100)
         self.dpi = config.get("dpi", 150)
         self.style = config.get("style", "default")
         

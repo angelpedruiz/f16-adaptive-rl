@@ -66,7 +66,7 @@ training:
   
 
 eval:
-  rolling_length: 100
+  rolling_length: 1000
   convergence_threshold: 0.05
   last_n: 50 #Number of final episodes to compute average and stability.
   settling_tolerance: 0.05
