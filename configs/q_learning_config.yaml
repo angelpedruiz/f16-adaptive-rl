@@ -21,7 +21,7 @@ agent:
     bins: [1, 20]                # Bins per action dimension
 
 environment:
-  name: "f16"                  # Environment name
+  name: "lunarlander"                  # Environment name
   
   # Environment parameters
   max_steps: 2000              # Maximum steps per episode

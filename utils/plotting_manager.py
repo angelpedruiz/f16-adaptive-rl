@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+from gymnasium.utils.save_video import save_video
 
 
 class PlottingManager:
@@ -273,3 +274,23 @@ class PlottingManager:
             plt.close()
         else:
             plt.show()
+            
+    def save_episode_video(self, env, episode_num: Optional[int] = None) -> None:
+        """
+        Save a video of the episode from recorded frames.
+        
+        Args:
+            video_frames: List of frames (numpy arrays) recorded during the episode
+            episode_num: Optional episode number for naming
+            fps: Frames per second for the video
+        """
+        if not self.enabled:
+            return
+        
+        video_frames = env.render()
+        fps = env.metadata.get('render_fps', 30)
+        video_filename = f"episode_{episode_num + 1}.mp4" if episode_num is not None else "test_episode.mp4"
+        video_path = self.trajectories_dir / video_filename
+        
+        # Save video using gymnasium's save_video utility
+        save_video(video_frames, str(video_path), fps=fps)

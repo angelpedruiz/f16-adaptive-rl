@@ -88,23 +88,12 @@ def create_lunar_lander_environment(env_config: Dict[str, Any]) -> gym.Env:
     Returns:
         Configured LunarLander environment
     """
-    env_kwargs = {}
+    # Use rgb_array render mode for video recording compatibility
+    render_mode = env_config.get("render_mode", "rgb_array")
     
-    # Add any LunarLander-specific configuration
-    if "continuous" in env_config:
-        env_name = "LunarLanderContinuous-v2" if env_config["continuous"] else "LunarLander-v2"
-    else:
-        env_name = "LunarLander-v2"
-    
-    if "max_episode_steps" in env_config:
-        env_kwargs["max_episode_steps"] = env_config["max_episode_steps"]
-    
-    env = gym.make(env_name, **env_kwargs)
-    
-    # Apply any wrappers if specified
-    if "wrappers" in env_config:
-        env = apply_wrappers(env, env_config["wrappers"])
-    
+    env = gym.make("LunarLander-v3", continuous=True, gravity=-10.0,
+               enable_wind=False, wind_power=15.0, turbulence_power=1.5,
+               render_mode=render_mode)
     return env
 
 

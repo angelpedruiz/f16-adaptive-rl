@@ -1,0 +1,123 @@
+# LunarLander Training Configuration
+# Complete configuration for training agents on LunarLander environment
+
+agent:
+  type: "q_learning"
+  
+  # Learning parameters
+  learning_rate: 0.1           # Q-learning update rate
+  initial_epsilon: 1.0         # Starting exploration rate
+  final_epsilon: 0.05          # Final exploration rate
+  epsilon_decay: 1.0e-05       # Decay rate for longer training
+  discount_factor: 0.99        # Reward discount factor
+  
+  # Discretization settings for LunarLander (8-dimensional observation space)
+  # LunarLander observations: [x_pos, y_pos, x_vel, y_vel, angle, angular_vel, left_leg_contact, right_leg_contact]
+  obs_discretizer:
+    type: "uniform_tile_coding"
+    bins: [10, 10, 8, 8, 8, 8, 2, 2]  # Bins per observation dimension (8 dims total)
+  
+  # Action discretization for continuous control (2-dimensional action space)
+  action_discretizer:
+    type: "uniform_tile_coding"  
+    bins: [15, 15]               # Bins per action dimension [main_engine, side_engines]
+
+environment:
+  name: "lunarlander"            # Environment name
+  
+  # Environment parameters
+  max_steps: None                # Maximum steps per episode
+  
+  # LunarLander specific parameters (handled by gym.make)
+  continuous: true               # Use continuous action space
+  gravity: -10.0                 # Gravity setting
+  enable_wind: false             # Disable wind for consistent training
+  wind_power: 15.0              # Wind power (when enabled)
+  turbulence_power: 1.5         # Turbulence power
+
+training:
+  episodes: 10000                # Total training episodes (more for complex env)
+  seed: 42                       # Random seed
+  log_frequency: 1000            # Log every N episodes
+  detailed_logging: true         # Enable detailed logging
+
+checkpointing:
+  interval: 2000                 # Checkpoint every N episodes
+  keep_last_n: 5                # Keep last N checkpoints
+  save_best: true                # Save best checkpoint based on performance
+  resume_from: null              # Resume checkpoint path
+
+plotting:
+  enabled: true                  # Enable/disable all plotting
+  
+  # Training metrics
+  training_metrics:
+    interval: 1000               # Plot every N episodes
+    rolling_window: 1000         # Rolling average window
+    save_individual: true        # Save individual plots
+  
+  # Trajectory episodes
+  trajectories:
+    interval: 1000               # Interval for saving trajectory data
+    episodes: [1, 10000, 25000, 50000]  # Episodes to plot trajectories
+    save_data: true              # Save trajectory data
+  
+  # Plot settings
+  figure_size: [12, 8]           # Figure dimensions
+  dpi: 150                       # Resolution
+  style: "seaborn"               # Plot style
+
+evaluation:
+  rolling_window: 2000           # Performance evaluation window
+  convergence_threshold: 0.05    # Convergence threshold (relaxed for complex env)
+  stability_episodes: 500        # Stability check episodes
+
+# Additional agent configurations for comparison
+agents:
+  # ADHDP configuration for LunarLander
+  adhdp:
+    type: "adhdp"
+    
+    # Neural network architecture
+    actor_network:
+      hidden_layers: [64, 32]
+      activation: "tanh"
+      learning_rate: 0.001
+      
+    critic_network:
+      hidden_layers: [64, 32] 
+      activation: "tanh"
+      learning_rate: 0.002
+      
+    # ADHDP specific parameters
+    gamma: 0.99
+    tau: 0.001                   # Soft update rate
+    exploration_noise: 0.1
+    
+    # Training parameters
+    batch_size: 64
+    memory_size: 100000
+    min_memory_size: 1000
+    update_frequency: 1
+    
+  # DQN configuration for LunarLander  
+  dqn:
+    type: "dqn"
+    
+    # Network architecture
+    network:
+      hidden_layers: [128, 64]
+      activation: "relu"
+      learning_rate: 0.0005
+      
+    # DQN parameters
+    gamma: 0.99
+    epsilon_start: 1.0
+    epsilon_end: 0.01
+    epsilon_decay: 0.995
+    
+    # Experience replay
+    memory_size: 10000
+    batch_size: 32
+    target_update_frequency: 100
+    min_memory_size: 1000

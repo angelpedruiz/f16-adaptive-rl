@@ -124,6 +124,13 @@ def train_agent(config_path: str, resume_from: str = None):
 
     training_logger = TrainingLogger(run_dir, training_config)
 
+    # Create videos directory for lunar lander environments
+    videos_dir = run_dir / "videos"
+    videos_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Check if environment is lunar lander type
+    is_lunar_lander = "lunar" in env_config.get("name", "").lower() or "lunarlander" in env_config.get("name", "").lower()
+
     # Handle resume from checkpoint
     start_episode = 0
     if resume_from:
@@ -205,15 +212,15 @@ def train_agent(config_path: str, resume_from: str = None):
                 times_reset.append(time.time() - reset_start)
             done = False
 
-            # Only record trajectories for specific milestone episodes or when explicitly needed
-            record_trajectory = (
+            # Record trajectories for non-lunar lander or videos for lunar lander
+            record_data = (
                 (episode + 1) % trajectories_interval == 0
                 and plotting_config.get("enabled", True)
                 and plotting_config["trajectories"].get("save_data", True)
             )
 
-            if record_trajectory:
-                # Pre-allocate arrays for better performance
+            if record_data and not is_lunar_lander:
+                # Pre-allocate arrays for trajectory recording (non-lunar lander)
                 max_episode_steps = training_config.get("max_steps", 3000)
                 state_trajectory = []
                 action_trajectory = []
@@ -221,6 +228,18 @@ def train_agent(config_path: str, resume_from: str = None):
                 errors_trajectory = []
                 reward_trajectory = []
                 step_count = 0
+            elif record_data and is_lunar_lander:
+                # Setup video recording for lunar lander
+                video_env = gym.wrappers.RecordVideo(
+                    env,
+                    video_folder=str(videos_dir),
+                    name_prefix=f"episode_{episode + 1}",
+                    episode_trigger=lambda x: True
+                )
+                current_env = video_env
+                obs, info = current_env.reset()
+            else:
+                current_env = env
 
             # Episode loop
             while not done:
@@ -231,9 +250,9 @@ def train_agent(config_path: str, resume_from: str = None):
                 if episode < 5:
                     times_get_action.append(time.time() - action_start)
 
-                # Take step in environment
+                # Take step in environment (use current_env for video recording)
                 step_start = time.time()
-                next_obs, reward, terminated, truncated, info = env.step(action)
+                next_obs, reward, terminated, truncated, info = current_env.step(action)
                 if episode < 5:
                     times_env_step.append(time.time() - step_start)
 
@@ -243,8 +262,8 @@ def train_agent(config_path: str, resume_from: str = None):
                 if episode < 5:
                     times_agent_update.append(time.time() - update_start)
 
-                # Record trajectories only when needed for plotting (optimized)
-                if record_trajectory:
+                # Record trajectories only for non-lunar lander environments
+                if record_data and not is_lunar_lander:
                     # Use copy to avoid reference issues and optimize access
                     state_trajectory.append(env.env.state.copy() if hasattr(env.env.state, "copy") else env.env.state)
                     action_trajectory.append(action)
@@ -256,6 +275,10 @@ def train_agent(config_path: str, resume_from: str = None):
                 # Move to next state
                 obs = next_obs
                 done = terminated or truncated
+
+            # Close video recording if it was active
+            if record_data and is_lunar_lander:
+                current_env.close()
 
             # Post-episode processing with timing
             logging_start = time.time()
@@ -273,8 +296,8 @@ def train_agent(config_path: str, resume_from: str = None):
                     episode, env, training_logger
                 )
 
-            # Create trajectory plots (only when data was recorded)
-            if record_trajectory:
+            # Create trajectory plots (only for non-lunar lander when data was recorded)
+            if record_data and not is_lunar_lander:
                 states = np.array(state_trajectory)
                 actions = np.array(action_trajectory)
                 save_path = plotting_manager.get_trajectory_path(episode)
@@ -361,6 +384,12 @@ def train_agent(config_path: str, resume_from: str = None):
             print(f"Total Episodes: {max(episode + 1, start_episode)}")
             print(f"Training Time:  {training_time / 60:.1f} minutes")
             print(f"Results saved in: {run_dir}")
+
+        # Video summary for lunar lander
+        if is_lunar_lander and plotting_config.get("enabled", True):
+            video_files = list(videos_dir.glob("*.mp4"))
+            if video_files:
+                print(f"Videos saved: {len(video_files)} episodes recorded in {videos_dir}")
 
 
 def main():
