@@ -66,7 +66,7 @@ environment:
       value: 10.0              # Constant value (radians)
 
 training:
-  episodes: 10000            # Total training episodes
+  episodes: 10000             # Total training episodes
   seed: 42                     # Random seed
   log_frequency: 1000          # Log every N episodes
   detailed_logging: true      # Enable detailed logging
@@ -88,7 +88,7 @@ plotting:
   
   # Trajectory episodes
   trajectories:
-    interval: 1000            # Interval for saving trajectory data
+    interval: 1000           # Interval for saving trajectory data
     episodes: [1, 30000, 60000]  # Episodes to plot trajectories
     save_data: true            # Save trajectory data
   

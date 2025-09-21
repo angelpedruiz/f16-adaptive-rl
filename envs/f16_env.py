@@ -120,9 +120,10 @@ class LinearModelF16(gym.Env):
             ref = getattr(self, "_cached_reference", None)
             if ref is None:
                 ref = self._get_reference()
-            observation[self.n_state_obs :] = (
-                ref[self.tracking_indices] - self.state[self.tracking_indices]
-            )
+            if ref is not None:
+                observation[self.n_state_obs :] = (
+                    ref[self.tracking_indices] - self.state[self.tracking_indices]
+                )
 
         return observation
 
@@ -138,7 +139,7 @@ class LinearModelF16(gym.Env):
         if ref is None:
             ref = self._get_reference()
         # Vectorized tracking error calculation using pre-computed indices
-        if self.n_error_obs > 0:
+        if self.n_error_obs > 0 and ref is not None:
             tracking_error = (
                 ref[self.tracking_indices] - self.state[self.tracking_indices]
             )
@@ -179,7 +180,7 @@ class LinearModelF16(gym.Env):
         ref = getattr(self, "_cached_reference", self._get_reference())
 
         # Vectorized tracking error calculation using pre-computed indices
-        if self.n_error_obs > 0:
+        if self.n_error_obs > 0 and ref is not None:
             tracking_error = (
                 ref[self.tracking_indices] - self.state[self.tracking_indices]
             )
@@ -284,7 +285,7 @@ class LinearModelF16(gym.Env):
         info = self._get_info()
         return observation, info
 
-    def _get_reference(self) -> np.ndarray:
+    def _get_reference(self) -> Optional[np.ndarray]:
         """
         Compute reference signals at current time.
 
@@ -294,9 +295,13 @@ class LinearModelF16(gym.Env):
             - cos_step: cosine-smoothed step function with discrete amplitude levels (precomputed)
 
         Returns:
-            np.ndarray: Reference values for all states.
-                        Untracked states are NaN.
+            np.ndarray or None: Reference values for all states (None if no reference config).
+                               Untracked states are NaN.
         """
+        # Return None if no reference configuration
+        if not self.reference_config:
+            return None
+            
         ref = np.full(self.state_dim, np.nan, dtype=np.float64)
         step = self.current_step
 
@@ -371,28 +376,27 @@ class LinearModelF16(gym.Env):
         if ref is None:
             ref = self._get_reference()
 
-        if self.n_error_obs > 0:
-            # Only compute tracking error for states with non-NaN references
+        if len(self.reference_config) > 0 and ref is not None:
+            tracking_indices = list(self.reference_config.keys())
+
+            # Only compute error for states with non-NaN reference
             tracking_error = []
-            for idx in self.tracking_indices:
+            valid_indices = []
+            for idx in tracking_indices:
                 if not np.isnan(ref[idx]):
                     tracking_error.append(ref[idx] - state[idx])
+                    valid_indices.append(idx)
             tracking_error = np.array(tracking_error, dtype=np.float64)
             squared_error = np.sum(tracking_error**2)
 
-            # Define max allowable error based on reasonable bounds for tracking errors
-            # Use a simple heuristic: sum of squared ranges for each tracked state
-            Emax = 0
-            for i, state_idx in enumerate(self.tracking_indices):
-                # Use a reasonable error bound (e.g., ±2.0 for most tracking tasks)
-                # This could be made configurable in the future
-                error_range = 4.0  # Assuming ±2.0 error range per tracked state
-                Emax += error_range**2
+            # Compute Emax from observation bounds
+            Emax = 0.0
+            for idx in valid_indices:
+                Emax += (self.obs_high[idx] - self.obs_low[idx]) ** 2
 
             # Shifted reward clipped at 0
             reward = max(0.0, Emax - squared_error)
         else:
-            # No reference config means no tracking; reward zero
             reward = 0.0
 
         # Penalties for early termination
@@ -402,6 +406,7 @@ class LinearModelF16(gym.Env):
             reward += 0.0  # No penalty for reaching max steps
 
         return float(reward)
+
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
         """
@@ -474,7 +479,8 @@ class LinearModelF16(gym.Env):
             print(f"Observation: {self._get_obs()}")
             if len(self.reference_config) > 0:
                 ref = self._get_reference()
-                print(f"Reference: {ref}")
+                if ref is not None:
+                    print(f"Reference: {ref}")
             print("-" * 50)
         return None
 

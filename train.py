@@ -246,7 +246,7 @@ def train_agent(config_path: str, resume_from: str = None):
                 # Record trajectories only when needed for plotting (optimized)
                 if record_trajectory:
                     # Use copy to avoid reference issues and optimize access
-                    state_trajectory.append(obs.copy() if hasattr(obs, "copy") else obs)
+                    state_trajectory.append(env.env.state.copy() if hasattr(env.env.state, "copy") else env.env.state)
                     action_trajectory.append(action)
                     reference_trajectory.append(info.get("reference", None))
                     errors_trajectory.append(info.get("tracking_error", None))

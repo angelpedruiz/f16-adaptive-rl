@@ -171,7 +171,7 @@ class PlottingManager:
         elif references is not None:
             # Auto-detect by checking which states have non-None references
             for state_idx in range(min(references.shape[1], 7)):
-                if any(ref[state_idx] is not None for ref in references if hasattr(ref, '__getitem__')):
+                if any(ref[state_idx] is not None and not np.isnan(ref[state_idx]) for ref in references if hasattr(ref, '__getitem__')):
                     states_with_references.append(state_idx)
 
         # Always plot all 7 states + actions + tracking errors for tracked states only
@@ -198,7 +198,7 @@ class PlottingManager:
                     ref_values = []
                     ref_times = []
                     for step_idx, ref_val in enumerate(references[:, i]):
-                        if ref_val is not None:
+                        if ref_val is not None and not np.isnan(ref_val):
                             ref_values.append(ref_val)
                             ref_times.append(step_idx)
                     
