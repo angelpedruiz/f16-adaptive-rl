@@ -2,25 +2,22 @@
 # Complete configuration for training agents on LunarLander environment
 
 agent:
-  type: "q_learning"
-  
-  # Learning parameters
-  learning_rate: 0.1           # Q-learning update rate
-  initial_epsilon: 1.0         # Starting exploration rate
-  final_epsilon: 0.05          # Final exploration rate
-  epsilon_decay: 1.0e-05       # Decay rate for longer training
-  discount_factor: 0.99        # Reward discount factor
-  
-  # Discretization settings for LunarLander (8-dimensional observation space)
-  # LunarLander observations: [x_pos, y_pos, x_vel, y_vel, angle, angular_vel, left_leg_contact, right_leg_contact]
-  obs_discretizer:
-    type: "uniform_tile_coding"
-    bins: [10, 10, 8, 8, 8, 8, 2, 2]  # Bins per observation dimension (8 dims total)
-  
-  # Action discretization for continuous control (2-dimensional action space)
-  action_discretizer:
-    type: "uniform_tile_coding"  
-    bins: [15, 15]               # Bins per action dimension [main_engine, side_engines]
+  type: dqn
+
+  # Learning hyperparameters
+  learning_rate: 0.0001          # Learning rate for neural network
+  discount_factor: 0.99         # Discount factor for future rewards
+  initial_epsilon: 1.0          # Starting exploration rate
+  final_epsilon: 0.01           # Final exploration rate
+  epsilon_decay: 0.995          # Decay rate for exploration (faster decay)
+  tau: 0.005                     # Soft update rate for target network
+
+  # Network parameters
+  hidden_sizes: [128, 128]      # Hidden layer sizes for the Q-network
+  batch_size: 128                # Batch size for training
+  memory_size: 10000            # Replay buffer size
+
+  device: 'cpu'
 
 environment:
   name: "lunarlander"            # Environment name
@@ -29,16 +26,16 @@ environment:
   max_steps: None                # Maximum steps per episode
   
   # LunarLander specific parameters (handled by gym.make)
-  continuous: true               # Use continuous action space
+  continuous: False               # Use continuous action space
   gravity: -10.0                 # Gravity setting
   enable_wind: false             # Disable wind for consistent training
   wind_power: 15.0              # Wind power (when enabled)
   turbulence_power: 1.5         # Turbulence power
 
 training:
-  episodes: 10000                # Total training episodes (more for complex env)
+  episodes: 600                # Total training episodes (more for complex env)
   seed: 42                       # Random seed
-  log_frequency: 1000            # Log every N episodes
+  log_frequency: 100            # Log every N episodes
   detailed_logging: true         # Enable detailed logging
 
 checkpointing:
@@ -52,13 +49,13 @@ plotting:
   
   # Training metrics
   training_metrics:
-    interval: 1000               # Plot every N episodes
-    rolling_window: 1000         # Rolling average window
+    interval: 100               # Plot every N episodes
+    rolling_window: 100         # Rolling average window
     save_individual: true        # Save individual plots
   
   # Trajectory episodes
   trajectories:
-    interval: 1000               # Interval for saving trajectory data
+    interval: 100               # Interval for saving trajectory data
     episodes: [1, 10000, 25000, 50000]  # Episodes to plot trajectories
     save_data: true              # Save trajectory data
   
@@ -121,3 +118,25 @@ agents:
     batch_size: 32
     target_update_frequency: 100
     min_memory_size: 1000
+
+
+
+  type: "q_learning"
+  
+  # Learning parameters
+  learning_rate: 0.1           # Q-learning update rate
+  initial_epsilon: 1.0         # Starting exploration rate
+  final_epsilon: 0.05          # Final exploration rate
+  epsilon_decay: 1.0e-05       # Decay rate for longer training
+  discount_factor: 0.99        # Reward discount factor
+  
+  # Discretization settings for LunarLander (8-dimensional observation space)
+  # LunarLander observations: [x_pos, y_pos, x_vel, y_vel, angle, angular_vel, left_leg_contact, right_leg_contact]
+  obs_discretizer:
+    type: "uniform_tile_coding"
+    bins: [10, 10, 8, 8, 8, 8, 2, 2]  # Bins per observation dimension (8 dims total)
+  
+  # Action discretization for continuous control (2-dimensional action space)
+  action_discretizer:
+    type: "uniform_tile_coding"  
+    bins: [15, 15]               # Bins per action dimension [main_engine, side_engines]

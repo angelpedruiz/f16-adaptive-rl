@@ -7,6 +7,7 @@ from typing import Dict, Any, Union
 from agents.q_learning import QLearning
 from agents.adhdp import ADHDPAgent
 from agents.actor_critic import ActorCritic
+from agents.dqn import DQNAgent
 from utils.discretizer import UniformTileCoding
 
 
@@ -32,6 +33,8 @@ def create_agent(agent_config: Dict[str, Any], env: gym.Env) -> object:
         return create_adhdp_agent(agent_config, env)
     elif agent_type == "actor_critic" or agent_type == "actorcritic":
         return create_actor_critic_agent(agent_config, env)
+    elif agent_type == "dqn":
+        return create_dqn_agent(agent_config, env)
     else:
         raise ValueError(f"Unsupported agent type: {agent_type}. Supported types: q_learning, adhdp, actor_critic")
 
@@ -197,3 +200,55 @@ def create_discretizer(discretizer_config: Dict[str, Any], space: gym.Space) -> 
         return UniformTileCoding(space, bins=bins)
     else:
         raise ValueError(f"Unsupported discretizer type: {discretizer_type}")
+    
+def create_dqn_agent(agent_config: Dict[str, Any], env: gym.Env) -> DQNAgent:
+    """
+    Create DQN agent.
+    
+    Args:
+        agent_config: Agent configuration dictionary
+        env: Environment the agent will interact with
+        
+    Returns:
+        Configured DQN agent
+    """
+    from agents.dqn import DQNAgent  # Import here to avoid circular dependencies
+    
+    # Default parameters for DQN
+    defaults = {
+        "hidden_sizes": [24, 24],
+        "batch_size": 64,
+        "memory_size": 10000,
+        "learning_rate": 0.001,
+        "discount_factor": 0.99,
+        "tau": 0.01,
+        "initial_epsilon": 1.0,
+        "epsilon_decay": 0.995,
+        "final_epsilon": 0.01,
+        "device": "cpu"
+    }
+    
+    # Override defaults with config values
+    params = {key: agent_config.get(key, default) for key, default in defaults.items()}
+    
+    obs_dim = env.observation_space.shape[0]
+    act_dim = env.action_space.n if hasattr(env.action_space, 'n') else env.action_space.shape[0]
+    
+    # Create agent
+    agent = DQNAgent(
+        obs_dim=obs_dim,
+        act_dim=act_dim,
+        hidden_sizes=params["hidden_sizes"],
+        batch_size=params["batch_size"],
+        memory_size=params["memory_size"],
+        learning_rate=params["learning_rate"],
+        gamma=params["discount_factor"],
+        tau=params["tau"],
+        epsilon_start=params["initial_epsilon"],
+        epsilon_decay=params["epsilon_decay"],
+        epsilon_min=params["final_epsilon"],
+        device=params["device"],
+        env=env
+    )
+    
+    return agent
