@@ -8,6 +8,7 @@ from agents.q_learning import QLearning
 from agents.adhdp import ADHDPAgent
 from agents.actor_critic import ActorCritic
 from agents.dqn import DQNAgent
+from agents.idhp import IDHPAgent
 from utils.discretizer import UniformTileCoding
 
 
@@ -35,8 +36,10 @@ def create_agent(agent_config: Dict[str, Any], env: gym.Env) -> object:
         return create_actor_critic_agent(agent_config, env)
     elif agent_type == "dqn":
         return create_dqn_agent(agent_config, env)
+    elif agent_type == "idhp":
+        return create_idhp_agent(agent_config, env)
     else:
-        raise ValueError(f"Unsupported agent type: {agent_type}. Supported types: q_learning, adhdp, actor_critic")
+        raise ValueError(f"Unsupported agent type: {agent_type}. Supported types: q_learning, adhdp, actor_critic, dqn, idhp")
 
 
 def create_q_learning_agent(agent_config: Dict[str, Any], env: gym.Env) -> QLearning:
@@ -249,6 +252,51 @@ def create_dqn_agent(agent_config: Dict[str, Any], env: gym.Env) -> DQNAgent:
         epsilon_min=params["final_epsilon"],
         device=params["device"],
         env=env
+    )
+    
+    return agent
+
+
+def create_idhp_agent(agent_config: Dict[str, Any], env: gym.Env) -> IDHPAgent:
+    """
+    Create IDHP agent.
+    
+    Args:
+        agent_config: Agent configuration dictionary
+        env: Environment the agent will interact with
+        
+    Returns:
+        Configured IDHP agent
+    """
+    # Default parameters for IDHP
+    defaults = {
+        "hidden_sizes": [64, 64],
+        "actor_lr": 0.0001,
+        "critic_lr": 0.0002,
+        "gamma": 0.99,
+        "device": "cpu",
+        "rls_lam": 0.99,
+        "rls_delta": 1.0
+    }
+    
+    # Override defaults with config values
+    params = {key: agent_config.get(key, default) for key, default in defaults.items()}
+    
+    obs_dim = env.observation_space.shape[0]
+    act_dim = env.action_space.shape[0] if hasattr(env.action_space, 'shape') else 1
+    
+    # Create agent
+    agent = IDHPAgent(
+        obs_dim=obs_dim,
+        act_dim=act_dim,
+        hidden_sizes=params["hidden_sizes"],
+        actor_lr=params["actor_lr"],
+        critic_lr=params["critic_lr"],
+        gamma=params["gamma"],
+        device=params["device"],
+        env=env,
+        rls_lam=params["rls_lam"],
+        rls_delta=params["rls_delta"]
     )
     
     return agent

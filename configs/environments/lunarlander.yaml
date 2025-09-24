@@ -1,0 +1,49 @@
+# LunarLander Environment Configuration
+name: "lunarlander"            # Environment name
+
+# Environment parameters
+max_steps: None                # Maximum steps per episode
+
+# LunarLander specific parameters (handled by gym.make)
+continuous: False               # Use continuous action space
+gravity: -10.0                 # Gravity setting
+enable_wind: false             # Disable wind for consistent training
+wind_power: 15.0              # Wind power (when enabled)
+turbulence_power: 1.5         # Turbulence power
+
+training:
+  episodes: 600                # Total training episodes (more for complex env)
+  seed: 42                       # Random seed
+  log_frequency: 100            # Log every N episodes
+  detailed_logging: true         # Enable detailed logging
+
+checkpointing:
+  interval: 2000                 # Checkpoint every N episodes
+  keep_last_n: 5                # Keep last N checkpoints
+  save_best: true                # Save best checkpoint based on performance
+  resume_from: null              # Resume checkpoint path
+
+plotting:
+  enabled: true                  # Enable/disable all plotting
+  
+  # Training metrics
+  training_metrics:
+    interval: 100               # Plot every N episodes
+    rolling_window: 100         # Rolling average window
+    save_individual: true        # Save individual plots
+  
+  # Trajectory episodes
+  trajectories:
+    interval: 100               # Interval for saving trajectory data
+    episodes: [1, 10000, 25000, 50000]  # Episodes to plot trajectories
+    save_data: true              # Save trajectory data
+  
+  # Plot settings
+  figure_size: [12, 8]           # Figure dimensions
+  dpi: 150                       # Resolution
+  style: "seaborn"               # Plot style
+
+evaluation:
+  rolling_window: 2000           # Performance evaluation window
+  convergence_threshold: 0.05    # Convergence threshold (relaxed for complex env)
+  stability_episodes: 500        # Stability check episodes

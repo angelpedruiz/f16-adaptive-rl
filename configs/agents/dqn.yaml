@@ -1,0 +1,17 @@
+# DQN configuration for LunarLander  
+type: dqn
+
+# Learning hyperparameters
+learning_rate: 0.0001          # Learning rate for neural network
+discount_factor: 0.99         # Discount factor for future rewards
+initial_epsilon: 1.0          # Starting exploration rate
+final_epsilon: 0.01           # Final exploration rate
+epsilon_decay: 0.995          # Decay rate for exploration (faster decay)
+tau: 0.005                     # Soft update rate for target network
+
+# Network parameters
+hidden_sizes: [128, 128]      # Hidden layer sizes for the Q-network
+batch_size: 128                # Batch size for training
+memory_size: 10000            # Replay buffer size
+
+device: 'cpu'

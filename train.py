@@ -70,21 +70,31 @@ def setup_run_directory(config: dict, agent_name: str, resume_from: str = None) 
         return run_dir
 
 
-def train_agent(config_path: str, resume_from: str = None):
+def train_agent(env_config_path: str, agent_config_path: str, resume_from: str = None):
     """
     Main training function that orchestrates the entire training process.
 
     Args:
-        config_path: Path to the YAML configuration file
+        env_config_path: Path to the environment configuration file
+        agent_config_path: Path to the agent configuration file
         resume_from: Optional path to checkpoint to resume training from
     """
     # Load and validate configuration
-    config = load_config(config_path)
+    env_config = load_config(env_config_path)
+    agent_config = load_config(agent_config_path)
+    
+    # Combine configs for validation and other processing
+    config = {
+        "agent": agent_config,
+        "environment": env_config,
+        "training": env_config.get("training", {}),
+        "plotting": env_config.get("plotting", {}),
+        "checkpointing": env_config.get("checkpointing", {}),
+        "evaluation": env_config.get("evaluation", {})
+    }
     validate_config(config)
 
     # Extract configuration sections
-    agent_config = config["agent"]
-    env_config = config["environment"]
     training_config = config["training"]
     plotting_config = config["plotting"]
     checkpoint_config = config["checkpointing"]
@@ -402,10 +412,17 @@ def main():
     )
 
     parser.add_argument(
-        "--config",
+        "--env-config",
         type=str,
-        default="configs/q_learning_config.yaml",
-        help="Path to the YAML configuration file (default: config/q_learning.yaml)",
+        default="configs/environments/lunarlander.yaml",
+        help="Path to the environment configuration file",
+    )
+
+    parser.add_argument(
+        "--agent-config", 
+        type=str,
+        default="configs/agents/idhp.yaml",
+        help="Path to the agent configuration file",
     )
 
     parser.add_argument(
@@ -417,9 +434,13 @@ def main():
 
     args = parser.parse_args()
 
-    # Validate config file exists
-    if not Path(args.config).exists():
-        print(f"Configuration file not found: {args.config}")
+    # Validate config files exist
+    if not Path(args.env_config).exists():
+        print(f"Environment configuration file not found: {args.env_config}")
+        sys.exit(1)
+    
+    if not Path(args.agent_config).exists():
+        print(f"Agent configuration file not found: {args.agent_config}")
         sys.exit(1)
 
     # Validate resume checkpoint if provided
@@ -428,7 +449,7 @@ def main():
         sys.exit(1)
 
     try:
-        train_agent(args.config, args.resume_from)
+        train_agent(args.env_config, args.agent_config, args.resume_from)
     except Exception as e:
         print(f"\nTraining failed with error: {e}")
         import traceback

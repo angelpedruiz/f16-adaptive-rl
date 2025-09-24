@@ -1,0 +1,20 @@
+# Q-Learning configuration
+type: "q_learning"
+
+# Learning parameters
+learning_rate: 0.1           # Q-learning update rate
+initial_epsilon: 1.0         # Starting exploration rate
+final_epsilon: 0.05          # Final exploration rate
+epsilon_decay: 1.0e-05       # Decay rate for longer training
+discount_factor: 0.99        # Reward discount factor
+
+# Discretization settings for LunarLander (8-dimensional observation space)
+# LunarLander observations: [x_pos, y_pos, x_vel, y_vel, angle, angular_vel, left_leg_contact, right_leg_contact]
+obs_discretizer:
+  type: "uniform_tile_coding"
+  bins: [10, 10, 8, 8, 8, 8, 2, 2]  # Bins per observation dimension (8 dims total)
+
+# Action discretization for continuous control (2-dimensional action space)
+action_discretizer:
+  type: "uniform_tile_coding"  
+  bins: [15, 15]               # Bins per action dimension [main_engine, side_engines]
