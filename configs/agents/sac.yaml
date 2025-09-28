@@ -1,0 +1,22 @@
+# SAC configuration for LunarLander continuous
+type: sac
+
+# Learning hyperparameters
+actor_lr: 0.0003               # Learning rate for actor network
+critic_lr: 0.0003              # Learning rate for critic networks
+alpha_lr: 0.0003               # Learning rate for temperature parameter
+gamma: 0.99                    # Discount factor for future rewards
+tau: 0.005                     # Soft update rate for target networks
+init_temp: 0.1                 # Initial temperature parameter
+
+# Network parameters
+hidden_sizes: [256, 256]       # Hidden layer sizes for networks
+batch_size: 256                # Batch size for training
+memory_size: 100000            # Replay buffer size
+
+# Training parameters
+learnable_temp: true           # Whether temperature is learnable
+critic_target_update_freq: 1   # Frequency of critic target updates
+actor_update_freq: 1           # Frequency of actor updates
+
+device: 'cuda'

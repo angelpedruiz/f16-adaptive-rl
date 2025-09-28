@@ -9,6 +9,8 @@ from agents.adhdp import ADHDPAgent
 from agents.actor_critic import ActorCritic
 from agents.dqn import DQNAgent
 from agents.idhp import IDHPAgent
+from agents.td3 import TD3Agent
+from agents.sac import SACAgent
 from utils.discretizer import UniformTileCoding
 
 
@@ -38,8 +40,12 @@ def create_agent(agent_config: Dict[str, Any], env: gym.Env) -> object:
         return create_dqn_agent(agent_config, env)
     elif agent_type == "idhp":
         return create_idhp_agent(agent_config, env)
+    elif agent_type == "td3":
+        return create_td3_agent(agent_config, env)
+    elif agent_type == "sac":
+        return create_sac_agent(agent_config, env)
     else:
-        raise ValueError(f"Unsupported agent type: {agent_type}. Supported types: q_learning, adhdp, actor_critic, dqn, idhp")
+        raise ValueError(f"Unsupported agent type: {agent_type}. Supported types: q_learning, adhdp, actor_critic, dqn, idhp, td3, sac")
 
 
 def create_q_learning_agent(agent_config: Dict[str, Any], env: gym.Env) -> QLearning:
@@ -297,6 +303,124 @@ def create_idhp_agent(agent_config: Dict[str, Any], env: gym.Env) -> IDHPAgent:
         env=env,
         rls_lam=params["rls_lam"],
         rls_delta=params["rls_delta"]
+    )
+    
+    return agent
+
+
+def create_td3_agent(agent_config: Dict[str, Any], env: gym.Env) -> TD3Agent:
+    """
+    Create TD3 agent.
+    
+    Args:
+        agent_config: Agent configuration dictionary
+        env: Environment the agent will interact with
+        
+    Returns:
+        Configured TD3 agent
+    """
+    # Default parameters for TD3
+    defaults = {
+        "hidden_sizes": [256, 256],
+        "batch_size": 64,
+        "memory_size": 10000,
+        "actor_lr": 0.001,
+        "critic_lr": 0.001,
+        "gamma": 0.99,
+        "tau": 0.01,
+        "exploration_noise_start": 0.1,
+        "exploration_noise_decay": 0.95,
+        "exploration_noise_min": 0.01,
+        "target_noise_std": 0.2,
+        "target_noise_clip": 0.5,
+        "max_grad_norm": 1.0,
+        "policy_delay": 2,
+        "device": "cpu"
+    }
+    
+    # Override defaults with config values
+    params = {key: agent_config.get(key, default) for key, default in defaults.items()}
+    
+    obs_dim = env.observation_space.shape[0]
+    act_dim = env.action_space.shape[0] if hasattr(env.action_space, 'shape') else 1
+    
+    # Create agent
+    agent = TD3Agent(
+        obs_dim=obs_dim,
+        act_dim=act_dim,
+        hidden_sizes=params["hidden_sizes"],
+        batch_size=params["batch_size"],
+        memory_size=params["memory_size"],
+        actor_lr=params["actor_lr"],
+        critic_lr=params["critic_lr"],
+        gamma=params["gamma"],
+        tau=params["tau"],
+        exploration_noise_start=params["exploration_noise_start"],
+        exploration_noise_decay=params["exploration_noise_decay"],
+        exploration_noise_min=params["exploration_noise_min"],
+        target_noise_std=params["target_noise_std"],
+        target_noise_clip=params["target_noise_clip"],
+        max_grad_norm=params["max_grad_norm"],
+        policy_delay=params["policy_delay"],
+        device=params["device"],
+        env=env
+    )
+    
+    return agent
+
+
+def create_sac_agent(agent_config: Dict[str, Any], env: gym.Env) -> SACAgent:
+    """
+    Create SAC agent.
+    
+    Args:
+        agent_config: Agent configuration dictionary
+        env: Environment the agent will interact with
+        
+    Returns:
+        Configured SAC agent
+    """
+    # Default parameters for SAC
+    defaults = {
+        "hidden_sizes": [256, 256],
+        "batch_size": 256,
+        "memory_size": 100000,
+        "actor_lr": 0.0003,
+        "critic_lr": 0.0003,
+        "alpha_lr": 0.0003,
+        "init_temp": 0.1,
+        "gamma": 0.99,
+        "tau": 0.005,
+        "learnable_temp": True,
+        "critic_target_update_freq": 1,
+        "actor_update_freq": 1,
+        "device": "cpu"
+    }
+    
+    # Override defaults with config values
+    params = {key: agent_config.get(key, default) for key, default in defaults.items()}
+    
+    obs_dim = env.observation_space.shape[0]
+    act_dim = env.action_space.shape[0] if hasattr(env.action_space, 'shape') else 1
+    
+    # Create agent
+    agent = SACAgent(
+        obs_dim=obs_dim,
+        act_dim=act_dim,
+        hidden_sizes=params["hidden_sizes"],
+        batch_size=params["batch_size"],
+        memory_size=params["memory_size"],
+        actor_lr=params["actor_lr"],
+        critic_lr=params["critic_lr"],
+        alpha_lr=params["alpha_lr"],
+        init_temp=params["init_temp"],
+        gamma=params["gamma"],
+        tau=params["tau"],
+        learnable_temp=params["learnable_temp"],
+        critic_target_update_freq=params["critic_target_update_freq"],
+        actor_update_freq=params["actor_update_freq"],
+        device=params["device"],
+        env=env
     )
     
     return agent

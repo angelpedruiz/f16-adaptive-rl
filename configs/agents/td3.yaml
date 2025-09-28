@@ -1,0 +1,27 @@
+# TD3 (Twin Delayed Deep Deterministic Policy Gradient) configuration
+type: td3
+
+# Learning hyperparameters
+actor_lr: 0.001                    # Learning rate for actor network
+critic_lr: 0.001                   # Learning rate for critic networks
+gamma: 0.99                        # Discount factor for future rewards
+tau: 0.01                          # Soft update rate for target networks
+
+# Exploration parameters
+exploration_noise_start: 0.2       # Initial exploration noise standard deviation
+exploration_noise_decay: 0.95      # Decay rate for exploration noise
+exploration_noise_min: 0.01        # Minimum exploration noise
+
+# TD3 specific parameters
+target_noise_std: 0.2              # Standard deviation for target policy smoothing noise
+target_noise_clip: 0.5             # Clipping range for target policy smoothing noise
+policy_delay: 2                     # Frequency of policy updates (relative to critic updates)
+
+# Network parameters
+hidden_sizes: [64, 128]           # Hidden layer sizes for actor and critic networks
+batch_size: 64                     # Batch size for training
+memory_size: 10000                 # Replay buffer size
+max_grad_norm: 1.0                 # Maximum gradient norm for clipping
+
+# Device configuration
+device: 'cuda'                      # Device to run on ('cpu' or 'cuda')

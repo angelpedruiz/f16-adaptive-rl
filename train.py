@@ -206,6 +206,10 @@ def train_agent(env_config_path: str, agent_config_path: str, resume_from: str =
             )
         except Exception as e:
             print(f"Warning: Could not create resumption plot: {e}")
+            
+#============================================================================
+# Main training loop
+#============================================================================
 
     try:
         for episode in tqdm(
@@ -222,7 +226,7 @@ def train_agent(env_config_path: str, agent_config_path: str, resume_from: str =
                 times_reset.append(time.time() - reset_start)
             done = False
 
-            # Record trajectories for non-lunar lander or videos for lunar lander
+            # Record trajectories
             record_data = (
                 (episode + 1) % trajectories_interval == 0
                 and plotting_config.get("enabled", True)
@@ -251,7 +255,9 @@ def train_agent(env_config_path: str, agent_config_path: str, resume_from: str =
             else:
                 current_env = env
 
-            # Episode loop
+            #============================================================================
+            # Single episode loop
+            #============================================================================
             while not done:
                 # Get action from agent
                 action_start = time.time()

@@ -5,7 +5,7 @@ name: "lunarlander"            # Environment name
 max_steps: None                # Maximum steps per episode
 
 # LunarLander specific parameters (handled by gym.make)
-continuous: False               # Use continuous action space
+continuous: True                # Use continuous action space
 gravity: -10.0                 # Gravity setting
 enable_wind: false             # Disable wind for consistent training
 wind_power: 15.0              # Wind power (when enabled)
