@@ -1,147 +1,99 @@
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
+"""
+Adaptive Heuristic Dynamic Programming (ADHDP) implementation in PyTorch.
+
+This module defines an actor–critic architecture where:
+- The **Critic** network approximates the cost-to-go function J(S, A), trained using
+  a Temporal Difference (TD) error derived from the Bellman equation.
+- The **Actor** network maps states S to actions A, trained to minimize the predicted
+  long-term cost (or equivalently maximize the reward-to-go) as estimated by the critic.
+
+Learning objective:
+    Critic loss: L_c = 0.5 * [J(S_t, A_t) - (R_t + γ(1 - done) * J(S_{t+1}, A_{t+1}))]^2
+    Actor  loss: L_a = -J(S_t, A_t)
+
+This corresponds to the action-dependent HDP algorithm, where both actor and critic
+are updated using backpropagation through differentiable neural networks.
+"""
 
 
-# ---------------- Actor Network ----------------
-class ActorNet(nn.Module):
-    def __init__(self, obs_dim, act_dim, hidden_dim=32, num_layers=2, act_limit=1.0):
+class Actor(nn.Module):
+    ''' Actor Network for HDP St -> At. Loss: J (cost-to-go)'''
+    def __init__(self, obs_dim: int, act_dim: int, hidden_sizes: list):
         super().__init__()
-        self.layers = nn.ModuleList()
-        self.layers.append(nn.Linear(obs_dim, hidden_dim))  # input layer
-        for _ in range(num_layers - 1):
-            self.layers.append(nn.Linear(hidden_dim, hidden_dim))
-        self.out = nn.Linear(hidden_dim, act_dim)  # output layer
-        self.act_limit = act_limit
-
-    def forward(self, obs):
-        x = obs
-        for layer in self.layers:
-            x = F.relu(layer(x))
-        action = torch.tanh(self.out(x)) * self.act_limit  # scale output
-        return action
-
-
-# ---------------- Critic Network ----------------
-class CriticNet(nn.Module):
-    def __init__(self, obs_dim, act_dim, hidden_dim=32, num_layers=2):
+        layers = []
+        prev_size = obs_dim
+        for hidden_size in hidden_sizes:
+            layers.append(nn.Linear(prev_size, hidden_size))
+            layers.append(nn.ReLU())
+            prev_size = hidden_size
+        layers.append(nn.Linear(prev_size, act_dim)) # Output layer
+        layers.append(nn.Tanh()) # Assuming action space is continuous   
+        self.model = nn.Sequential(*layers)
+    
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        return self.model(obs)
+        
+class Critic(nn.Module):
+    ''' Critic Network for HDP St, At -> Jt (cost-to-go) [float]'''
+    def __init__(self, obs_dim: int, act_dim: int, hidden_sizes: list):
         super().__init__()
-        self.layers = nn.ModuleList()
-        self.layers.append(nn.Linear(obs_dim + act_dim, hidden_dim))  # input layer
-        for _ in range(num_layers - 1):
-            self.layers.append(nn.Linear(hidden_dim, hidden_dim))
-        self.out = nn.Linear(hidden_dim, 1)  # Q-value output
+        layers = []
+        prev_size = obs_dim + act_dim
+        for hidden_size in hidden_sizes:
+            layers.append(nn.Linear(prev_size, hidden_size))
+            layers.append(nn.ReLU())
+            prev_size = hidden_size
+        layers.append(nn.Linear(prev_size, 1)) # Output layer
+        self.model = nn.Sequential(*layers)
 
-    def forward(self, obs, act):
-        x = torch.cat([obs, act], dim=-1)  # combine state and action
-        for layer in self.layers:
-            x = F.relu(layer(x))
-        q_value = self.out(x)
-        return torch.squeeze(q_value, -1)  # ensure proper shape
+    def forward(self, obs: torch.Tensor, act: torch.Tensor) -> torch.Tensor:
+        return self.model(torch.cat([obs, act], dim=-1))
 
 
-# ---------------- ADHDP Agent ----------------
-class ADHDPAgent:
-    def __init__(self, obs_dim, act_dim, action_low, action_high,
-                 hidden_dim=32, num_layers=2, act_limit=1.0,
-                 actor_lr=1e-3, critic_lr=1e-3, gamma=0.99,
-                 noise=True, device="cpu"):
-
+class ADHDPAgent():
+    def __init__(self, obs_dim: int, act_dim: int, hidden_sizes: list[int], actor_lr: float, critic_lr: float, gamma: float, device: str):
         self.device = device
         self.gamma = gamma
-        self.noise = noise
 
-        # Action bounds
-        self.action_low = torch.tensor(action_low, dtype=torch.float32, device=device)
-        self.action_high = torch.tensor(action_high, dtype=torch.float32, device=device)
+        self.actor = Actor(obs_dim, act_dim, hidden_sizes).to(device)
+        self.critic = Critic(obs_dim, act_dim, hidden_sizes).to(device)
 
-        # Networks
-        self.actor = ActorNet(obs_dim, act_dim, hidden_dim, num_layers, act_limit).to(device)
-        self.critic = CriticNet(obs_dim, 2, hidden_dim, num_layers).to(device)
-
-        # Optimizers
-        self.actor_opt = optim.Adam(self.actor.parameters(), lr=actor_lr)
-        self.critic_opt = optim.Adam(self.critic.parameters(), lr=critic_lr)
-
-        # Logging
-        self.training_error = []
-        self.last_action = None
-
-    # Convert scalar actor output to full 2D action
-    def _build_full_action(self, raw_scalar, add_noise=True):
-        scaled = ((raw_scalar + 1) / 2) * (self.action_high[1] - self.action_low[1]) + self.action_low[1]
-        if add_noise and self.noise:
-            noise = np.random.normal(0, 0.5)
-            scaled = torch.clamp(scaled + noise, self.action_low[1], self.action_high[1])
-        return np.array([0.0, scaled.item()])
-
-    # Get action for environment
-    def get_action(self, obs):
-        obs_tensor = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=critic_lr)
+        
+    def get_action(self, obs: np.ndarray) -> np.ndarray: # At [-1, 1]
+        obs_tensor = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)  # Add batch dimension
         with torch.no_grad():
-            raw_scalar = self.actor(obs_tensor)
-        physical_action = self._build_full_action(raw_scalar, add_noise=True)
-        self.last_action = physical_action
-        return physical_action
-
-    # Update actor and critic
-    def update(self, obs, action, reward, terminated, next_obs):
+            action_tensor = self.actor(obs_tensor)
+        return action_tensor.cpu().numpy().flatten()  # Remove batch dimension and convert to numpy
+    
+    def update(self, obs: np.ndarray, action: np.ndarray, reward: float, terminated: bool, next_obs: np.ndarray) -> None:
+        # Convert to tensors
         obs = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
         action = torch.tensor(action, dtype=torch.float32, device=self.device).unsqueeze(0)
-        reward = torch.tensor(reward, dtype=torch.float32, device=self.device).unsqueeze(0)
+        reward = torch.tensor(reward, dtype=torch.float32, device=self.device).unsqueeze(0).unsqueeze(0)
+        done = torch.tensor(terminated, dtype=torch.float32, device=self.device).unsqueeze(0).unsqueeze(0)
         next_obs = torch.tensor(next_obs, dtype=torch.float32, device=self.device).unsqueeze(0)
-
-        with torch.no_grad():
-            next_raw = self.actor(next_obs)
-            next_action = torch.tensor(self._build_full_action(next_raw, add_noise=False),
-                                       dtype=torch.float32, device=self.device).unsqueeze(0)
-            next_q = self.critic(next_obs, next_action)
-            td_target = reward + (0.0 if terminated else self.gamma * next_q)
-
-        # Critic update
-        td_loss = F.mse_loss(self.critic(obs, action), td_target)
-        self.critic_opt.zero_grad()
-        td_loss.backward()
-        self.critic_opt.step()
-        self.training_error.append(td_loss.item())
-
-        # Actor update
-        raw_actor = self.actor(obs)
-        actor_action = torch.tensor(self._build_full_action(raw_actor, add_noise=False),
-                                    dtype=torch.float32, device=self.device).unsqueeze(0)
-        actor_loss = -self.critic(obs, actor_action).mean()
-        self.actor_opt.zero_grad()
+        
+        # ===== Critic Update =====
+        next_action = self.actor(next_obs)
+        J_pred = self.critic(obs, action) # forward pass
+        J_next = self.critic(next_obs, next_action)
+        critic_error = J_pred - (reward + self.gamma * (1 - done) * J_next)
+        critic_loss = 0.5 * (critic_error ** 2).mean()
+        
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        self.critic_optimizer.step()
+        
+        # ===== Actor Update =====
+        actor_loss = -self.critic(obs, self.actor(obs)).mean() # forward pass maximizing Gt (discounted return) = -Jt
+        
+        self.actor_optimizer.zero_grad()
         actor_loss.backward()
-        self.actor_opt.step()
+        self.actor_optimizer.step()
+        
 
-    # Logging helpers
-    def reset_training_log(self):
-        self.training_error = []
-
-    def get_training_log(self):
-        return self.training_error
-
-    # Serialization
-    def get_brain(self):
-        return {
-            "actor_state_dict": self.actor.state_dict(),
-            "critic_state_dict": self.critic.state_dict(),
-            "actor_opt_state_dict": self.actor_opt.state_dict(),
-            "critic_opt_state_dict": self.critic_opt.state_dict(),
-            "gamma": self.gamma,
-            "training_error": self.training_error,
-            "action_low": self.action_low.cpu().numpy(),
-            "action_high": self.action_high.cpu().numpy(),
-        }
-
-    def load_brain(self, brain_dict):
-        self.actor.load_state_dict(brain_dict["actor_state_dict"])
-        self.critic.load_state_dict(brain_dict["critic_state_dict"])
-        self.actor_opt.load_state_dict(brain_dict["actor_opt_state_dict"])
-        self.critic_opt.load_state_dict(brain_dict["critic_opt_state_dict"])
-        self.gamma = brain_dict["gamma"]
-        self.training_error = brain_dict.get("training_error", [])
-        self.action_low = torch.tensor(brain_dict["action_low"], dtype=torch.float32, device=self.device)
-        self.action_high = torch.tensor(brain_dict["action_high"], dtype=torch.float32, device=self.device)

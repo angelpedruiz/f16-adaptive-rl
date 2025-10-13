@@ -123,7 +123,7 @@ class TD3Agent:
         self.critic_target_1.load_state_dict(self.critic_1.state_dict())
         self.critic_target_2.load_state_dict(self.critic_2.state_dict())
         
-        # Optimizers and loss function
+        # Optimizers
         self.critic_optimizer = optim.Adam(list(self.critic_1.parameters()) + list(self.critic_2.parameters()), lr=self.critic_lr) # manages both critics
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.actor_lr)
         
