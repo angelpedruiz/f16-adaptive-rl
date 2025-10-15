@@ -1,0 +1,86 @@
+# Short-Period Pitch Dynamics Environment Configuration
+# Linearized short-period dynamics with sinusoidal reference tracking
+
+name: "shortperiod"                # Environment name
+
+# System dynamics matrices
+# Linear model: x_dot = A*x + B*u where x = [alpha, q]^T
+dynamics:
+  # A matrix (2x2): System dynamics
+  # Default: [[-0.5, 1.0], [-20.0, -2.0]]
+  A: [[-0.5, 1.0], [-20.0, -2.0]]
+
+  # B matrix (2x1): Control input
+  # Default: [[0.0], [5.0]]
+  B: [[0.0], [5.0]]
+
+# Simulation parameters
+dt: 0.01                          # Integration time step [s]
+max_steps: 3000                   # Maximum steps per episode
+
+# Reference signal configuration
+reference:
+  amplitude: 0.1                  # Reference amplitude [rad] (~5.7 degrees)
+  period: 5.0                    # Reference period [s]
+
+# Noise configuration
+noise:
+  process_noise_std: 0.0          # Standard deviation of process noise (0.0 = no noise)
+
+# Reward function weights
+reward:
+  w_alpha: 100.0                  # Weight for tracking error penalty
+  w_q: 0.0                       # Weight for pitch rate penalty
+  w_u: 0.0                        # Weight for control effort penalty
+
+# State and action limits
+limits:
+  alpha_max: 0.2                 # Maximum angle of attack for observation [rad] (~20 deg)
+  q_max: 50.0                     # Maximum pitch rate for observation [rad/s]
+  delta_max_deg: 25.0             # Maximum elevator deflection [degrees]
+
+  # Termination limits (slightly larger than observation limits)
+  alpha_term: 0.3                 # Termination threshold for alpha [rad]
+  q_term: 75.0                   # Termination threshold for pitch rate [rad/s]
+  term_penalty: -1000.0           # Penalty for constraint violation
+
+# Training configuration
+training:
+  episodes: 10                  # Total training episodes
+  seed: 42                        # Random seed for reproducibility
+  log_frequency: 1              # Log every N episodes
+  detailed_logging: true          # Enable detailed logging
+
+# Checkpointing configuration
+checkpointing:
+  interval: 1000                  # Save checkpoint every N episodes
+  keep_last_n: 5                  # Keep last N checkpoints
+  save_best: true                 # Save best checkpoint based on performance
+  resume_from: null               # Path to checkpoint to resume from
+
+# Plotting configuration
+plotting:
+  enabled: true                   # Enable/disable all plotting
+
+  # Training metrics plots
+  training_metrics:
+    interval: 100                 # Plot training metrics every N episodes
+    rolling_window: 100           # Window size for rolling average
+    save_individual: true         # Save individual metric plots
+
+  # Trajectory plots
+  trajectories:
+    interval: 1                 # Save trajectory data every N episodes
+    episodes: [1, 1000, 2500, 5000]  # Specific episodes to plot
+    save_data: true               # Save trajectory data to files
+
+  # Plot appearance settings
+  figure_size: [12, 8]            # Figure dimensions [width, height]
+  dpi: 150                        # Resolution for saved plots
+  style: "seaborn"                # Matplotlib style
+
+# Evaluation configuration
+evaluation:
+  rolling_window: 500             # Window for performance evaluation
+  convergence_threshold: 0.05     # Threshold for convergence detection
+  stability_episodes: 100         # Episodes to check for stability

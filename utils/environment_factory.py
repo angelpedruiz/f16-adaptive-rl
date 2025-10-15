@@ -3,8 +3,10 @@ Factory for creating environments based on configuration.
 """
 
 import gymnasium as gym
+import numpy as np
 from typing import Dict, Any
 from envs.f16_env import LinearModelF16
+from envs.shortperiod_env import ShortPeriodEnv
 from data.LinearF16SS import A_long_hi_ref as A, B_long_hi as B
 
 
@@ -25,6 +27,8 @@ def create_environment(env_config: Dict[str, Any]) -> gym.Env:
     
     if env_name == "f16" or env_name == "linearmodelf16":
         return create_f16_environment(env_config)
+    elif env_name in ["shortperiod", "short_period"]:
+        return create_shortperiod_environment(env_config)
     elif env_name in ["lunarlander", "lunar_lander"]:
         return create_lunar_lander_environment(env_config)
     elif env_name in ["invertedpendulum", "inverted_pendulum"]:
@@ -75,6 +79,58 @@ def create_f16_environment(env_config: Dict[str, Any]) -> LinearModelF16:
         obs_high=env_config.get("obs_high")
     )
     
+    return env
+
+
+def create_shortperiod_environment(env_config: Dict[str, Any]) -> ShortPeriodEnv:
+    """
+    Create Short-Period Pitch Dynamics environment.
+
+    Args:
+        env_config: Environment configuration dictionary
+
+    Returns:
+        Configured ShortPeriodEnv environment
+    """
+    # Extract dynamics matrices from config
+    dynamics_config = env_config.get("dynamics", {})
+    A_matrix = np.array(dynamics_config.get("A", [[-0.5, 1.0], [-20.0, -2.0]]))
+    B_matrix = np.array(dynamics_config.get("B", [[0.0], [5.0]]))
+
+    # Extract reference configuration
+    reference_config = env_config.get("reference", {})
+    A_ref = reference_config.get("amplitude", 0.1)
+    T_ref = reference_config.get("period", 10.0)
+
+    # Extract noise configuration
+    noise_config = env_config.get("noise", {})
+    process_noise_std = noise_config.get("process_noise_std", 0.0)
+
+    # Extract reward weights
+    reward_config = env_config.get("reward", {})
+    w_alpha = reward_config.get("w_alpha", 100.0)
+    w_q = reward_config.get("w_q", 10.0)
+    w_u = reward_config.get("w_u", 1.0)
+
+    # Extract simulation parameters
+    dt = env_config.get("dt", 0.02)
+    max_steps = env_config.get("max_steps", 1000)
+
+    # Create environment with all parameters
+    env = ShortPeriodEnv(
+        A=A_matrix,
+        B=B_matrix,
+        dt=dt,
+        A_ref=A_ref,
+        T_ref=T_ref,
+        process_noise_std=process_noise_std,
+        w_alpha=w_alpha,
+        w_q=w_q,
+        w_u=w_u,
+        max_episode_steps=max_steps,
+        render_mode=env_config.get("render_mode", None)
+    )
+
     return env
 
 
