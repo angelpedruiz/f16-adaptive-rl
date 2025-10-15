@@ -105,53 +105,40 @@ def create_q_learning_agent(agent_config: Dict[str, Any], env: gym.Env) -> QLear
 def create_adhdp_agent(agent_config: Dict[str, Any], env: gym.Env) -> ADHDPAgent:
     """
     Create ADHDP agent.
-    
+
     Args:
         agent_config: Agent configuration dictionary
         env: Environment the agent will interact with
-        
+
     Returns:
         Configured ADHDP agent
     """
     # Default parameters for ADHDP
     defaults = {
-        "obs_dim": env.observation_space.shape[0],
-        "act_dim": env.action_space.shape[0] if hasattr(env.action_space, 'shape') else 1,
-        "hidden_dim": 32,
-        "num_layers": 2,
+        "hidden_sizes": [64, 64],
         "actor_lr": 0.001,
         "critic_lr": 0.001,
         "gamma": 0.99,
-        "noise": True,
         "device": "cpu"
     }
-    
+
     # Override defaults with config values
     params = {key: agent_config.get(key, default) for key, default in defaults.items()}
-    
-    # Extract action bounds from environment or config
-    if hasattr(env.action_space, 'low') and hasattr(env.action_space, 'high'):
-        action_low = env.action_space.low
-        action_high = env.action_space.high
-    else:
-        action_low = agent_config.get("action_low", [-1])
-        action_high = agent_config.get("action_high", [1])
-    
+
+    obs_dim = env.observation_space.shape[0]
+    act_dim = env.action_space.shape[0] if hasattr(env.action_space, 'shape') else 1
+
     # Create agent
     agent = ADHDPAgent(
-        obs_dim=params["obs_dim"],
-        act_dim=params["act_dim"],
-        action_low=action_low,
-        action_high=action_high,
-        hidden_dim=params["hidden_dim"],
-        num_layers=params["num_layers"],
+        obs_dim=obs_dim,
+        act_dim=act_dim,
+        hidden_sizes=params["hidden_sizes"],
         actor_lr=params["actor_lr"],
         critic_lr=params["critic_lr"],
         gamma=params["gamma"],
-        noise=params["noise"],
         device=params["device"]
     )
-    
+
     return agent
 
 

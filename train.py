@@ -241,7 +241,9 @@ def train_agent(env_config_path: str, agent_config_path: str, resume_from: str =
                 reference_trajectory = []
                 errors_trajectory = []
                 reward_trajectory = []
+                alpha_ref_trajectory = []  # For shortperiod environment
                 step_count = 0
+                current_env = env
             elif record_data and is_lunar_lander:
                 # Setup video recording for lunar lander
                 video_env = gym.wrappers.RecordVideo(
@@ -286,6 +288,7 @@ def train_agent(env_config_path: str, agent_config_path: str, resume_from: str =
                     reference_trajectory.append(info.get("reference", None))
                     errors_trajectory.append(info.get("tracking_error", None))
                     reward_trajectory.append(reward)
+                    alpha_ref_trajectory.append(info.get("alpha_ref", None))  # For shortperiod
                     step_count += 1
                     
                 # Move to next state
@@ -317,16 +320,33 @@ def train_agent(env_config_path: str, agent_config_path: str, resume_from: str =
                 states = np.array(state_trajectory)
                 actions = np.array(action_trajectory)
                 save_path = plotting_manager.get_trajectory_path(episode)
-                plotting_manager.plot_test_episode_trajectory(
-                    states=states,
-                    actions=actions,
-                    references=np.array(reference_trajectory),
-                    errors=np.array(errors_trajectory),
-                    rewards=reward_trajectory,
-                    episode_num=episode,
-                    save_path=str(save_path),
-                    reference_config=getattr(base_env, "reference_config", None),
-                )
+
+                # Check if this is shortperiod environment
+                is_shortperiod = "shortperiod" in env_config.get("name", "").lower()
+
+                if is_shortperiod and alpha_ref_trajectory:
+                    # Use specialized shortperiod plotting
+                    plotting_manager.plot_shortperiod_trajectory(
+                        states=states,
+                        actions=actions,
+                        alpha_refs=np.array(alpha_ref_trajectory),
+                        tracking_errors=np.array(errors_trajectory),
+                        rewards=reward_trajectory,
+                        episode_num=episode,
+                        save_path=str(save_path),
+                    )
+                else:
+                    # Use general trajectory plotting
+                    plotting_manager.plot_test_episode_trajectory(
+                        states=states,
+                        actions=actions,
+                        references=np.array(reference_trajectory),
+                        errors=np.array(errors_trajectory),
+                        rewards=reward_trajectory,
+                        episode_num=episode,
+                        save_path=str(save_path),
+                        reference_config=getattr(base_env, "reference_config", None),
+                    )
 
             # Decay exploration parameters if agent supports it
             if hasattr(agent, "decay_epsilon"):

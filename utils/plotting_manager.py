@@ -234,10 +234,15 @@ class PlottingManager:
 
         # Plot tracking errors (only for states with references)
         if errors is not None and states_with_references:
+            errors_array = np.atleast_2d(errors)
+            # If errors was 1D, reshape to (N, 1) for consistent indexing
+            if errors.ndim == 1:
+                errors_array = errors[:, np.newaxis]
+
             for j, idx in enumerate(states_with_references):
-                if j < errors.shape[1]:  # Ensure error data exists
+                if j < errors_array.shape[1]:  # Ensure error data exists
                     ax = axes[plot_idx]
-                    ax.plot(t, errors[:, j], color="red", linestyle="--", linewidth=2)
+                    ax.plot(t, errors_array[:, j], color="red", linestyle="--", linewidth=2)
                     label = state_labels[idx] if idx < len(state_labels) else f"State {idx}"
                     ax.set_ylabel(f"{label} Tracking Error", color="white")
                     ax.set_xlabel("Time Step", color="white")
@@ -294,3 +299,128 @@ class PlottingManager:
         
         # Save video using gymnasium's save_video utility
         save_video(video_frames, str(video_path), fps=fps)
+
+    def plot_shortperiod_trajectory(
+        self,
+        states: np.ndarray,
+        actions: np.ndarray,
+        alpha_refs: np.ndarray,
+        tracking_errors: np.ndarray,
+        rewards: List[float],
+        episode_num: Optional[int] = None,
+        save_path: Optional[str] = None,
+    ):
+        """
+        Plot trajectory specifically for short-period dynamics environment.
+
+        Args:
+            states: State trajectory array (timesteps, 2) - [alpha, q]
+            actions: Action trajectory array (timesteps, 1) - [delta_e]
+            alpha_refs: Reference alpha trajectory array (timesteps,)
+            tracking_errors: Tracking error trajectory array (timesteps,)
+            rewards: List of rewards per timestep
+            episode_num: Optional episode number for labeling
+            save_path: Path to save the plot
+        """
+        if not self.enabled:
+            return
+
+        fig, axes = plt.subplots(2, 3, figsize=(15, 8), dpi=self.dpi)
+        axes = axes.flatten()
+
+        timesteps = np.arange(len(states))
+        dt = 0.01  # Assuming 0.01s timestep from config
+        time = timesteps * dt
+
+        # Plot 1: Alpha (angle of attack) with reference
+        ax = axes[0]
+        ax.plot(time, states[:, 0], color="cyan", linewidth=2, label="Alpha")
+        ax.plot(time, alpha_refs, color="magenta", linestyle="--", linewidth=2, label="Alpha Reference")
+        ax.set_xlabel("Time (s)", color="white")
+        ax.set_ylabel("Alpha (rad)", color="white")
+        ax.legend(loc="best", facecolor="black", edgecolor="white", labelcolor="white")
+        ax.grid(True, alpha=0.3)
+        ax.set_facecolor("black")
+        ax.tick_params(colors="white")
+        for spine in ax.spines.values():
+            spine.set_color("white")
+
+        # Plot 2: Pitch rate (q)
+        ax = axes[1]
+        ax.plot(time, states[:, 1], color="cyan", linewidth=2, label="q (pitch rate)")
+        ax.set_xlabel("Time (s)", color="white")
+        ax.set_ylabel("q (rad/s)", color="white")
+        ax.legend(loc="best", facecolor="black", edgecolor="white", labelcolor="white")
+        ax.grid(True, alpha=0.3)
+        ax.set_facecolor("black")
+        ax.tick_params(colors="white")
+        for spine in ax.spines.values():
+            spine.set_color("white")
+
+        # Plot 3: Action (elevator deflection)
+        ax = axes[2]
+        ax.plot(time, actions[:, 0], color="yellow", linewidth=2, label="Elevator")
+        ax.set_xlabel("Time (s)", color="white")
+        ax.set_ylabel("Delta_e (rad)", color="white")
+        ax.legend(loc="best", facecolor="black", edgecolor="white", labelcolor="white")
+        ax.grid(True, alpha=0.3)
+        ax.set_facecolor("black")
+        ax.tick_params(colors="white")
+        for spine in ax.spines.values():
+            spine.set_color("white")
+
+        # Plot 4: Tracking error
+        ax = axes[3]
+        ax.plot(time, tracking_errors, color="red", linestyle="--", linewidth=2, label="Tracking Error")
+        ax.axhline(y=0, color="white", linestyle=":", alpha=0.5)
+        ax.set_xlabel("Time (s)", color="white")
+        ax.set_ylabel("Alpha Error (rad)", color="white")
+        ax.legend(loc="best", facecolor="black", edgecolor="white", labelcolor="white")
+        ax.grid(True, alpha=0.3)
+        ax.set_facecolor("black")
+        ax.tick_params(colors="white")
+        for spine in ax.spines.values():
+            spine.set_color("white")
+
+        # Plot 5: Rewards
+        ax = axes[4]
+        ax.plot(time, rewards, color="green", linewidth=2, label="Reward")
+        ax.set_xlabel("Time (s)", color="white")
+        ax.set_ylabel("Reward", color="white")
+        ax.legend(loc="best", facecolor="black", edgecolor="white", labelcolor="white")
+        ax.grid(True, alpha=0.3)
+        ax.set_facecolor("black")
+        ax.tick_params(colors="white")
+        for spine in ax.spines.values():
+            spine.set_color("white")
+
+        # Plot 6: Cumulative reward
+        ax = axes[5]
+        cumulative_reward = np.cumsum(rewards)
+        ax.plot(time, cumulative_reward, color="lime", linewidth=2, label="Cumulative Reward")
+        ax.set_xlabel("Time (s)", color="white")
+        ax.set_ylabel("Cumulative Reward", color="white")
+        ax.legend(loc="best", facecolor="black", edgecolor="white", labelcolor="white")
+        ax.grid(True, alpha=0.3)
+        ax.set_facecolor("black")
+        ax.tick_params(colors="white")
+        for spine in ax.spines.values():
+            spine.set_color("white")
+
+        # Figure title
+        ep_str = f"Episode {episode_num + 1}" if episode_num is not None else "Test Episode"
+        total_reward = sum(rewards)
+        fig.suptitle(
+            f"{ep_str} - Short-Period Dynamics | Total Reward: {total_reward:.2f}",
+            fontsize=14,
+            color="white",
+            y=0.98
+        )
+        fig.patch.set_facecolor("black")
+
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+        if save_path:
+            plt.savefig(save_path, facecolor="black", dpi=self.dpi, bbox_inches="tight")
+
+        plt.close(fig)

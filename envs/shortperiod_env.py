@@ -111,7 +111,7 @@ class ShortPeriodEnv(gym.Env):
         self.q_term = 200.0     # rad/s
         self.term_penalty = -1000.0
 
-        # Define observation space: [�, q, �_ref]
+        # Define observation space: [alpha, q, alpha_ref]
         self.observation_space = spaces.Box(
             low=np.array([-self.alpha_max, -self.q_max, -self.alpha_max]),
             high=np.array([self.alpha_max, self.q_max, self.alpha_max]),
