@@ -10,4 +10,4 @@ gamma: 0.99                        # Discount factor for future rewards
 hidden_sizes: [64, 64]             # Hidden layer sizes for actor and critic networks
 
 # Device configuration
-device: 'cpu'                      # Device to run on ('cpu' or 'cuda')
+device: 'cuda'                      # Device to run on ('cpu' or 'cuda')

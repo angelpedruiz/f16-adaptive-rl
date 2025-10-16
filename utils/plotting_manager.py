@@ -11,9 +11,16 @@ from gymnasium.utils.save_video import save_video
 
 class PlottingManager:
     """
-    Handles plotting for:
+    Handles plotting for training metrics and environment-specific trajectory plots.
+
+    Features:
     1. Training metrics: episode rewards, lengths, and training error.
-    2. Test episode trajectories: states, actions, reference overlays, and tracking errors.
+    2. Environment-specific trajectory plots:
+       - F16: Full state/action/error tracking with reference overlays
+       - LunarLander: Position, velocity, and action visualization
+       - ShortPeriod: Alpha tracking with reference, pitch rate, and rewards
+
+    Configuration-driven behavior with organized save paths and styling options.
     """
 
     def __init__(self, run_dir: Path, config: Dict[str, Any]):
@@ -56,6 +63,39 @@ class PlottingManager:
     @staticmethod
     def _moving_average(arr, window, mode="valid"):
         return np.convolve(np.array(arr).flatten(), np.ones(window), mode=mode) / window
+
+    def _resolve_save_path(self, save_path: Optional[str], episode_num: Optional[int]) -> Optional[Path]:
+        """
+        Helper method to resolve the save path for trajectory plots.
+
+        Args:
+            save_path: User-provided save path or None
+            episode_num: Episode number for default naming
+
+        Returns:
+            Resolved Path object or None if no saving requested
+        """
+        if save_path is not None:
+            # If save_path is provided, use it
+            if isinstance(save_path, str) or isinstance(save_path, Path):
+                final_save_path = Path(save_path)
+                # Ensure parent directory exists
+                final_save_path.parent.mkdir(parents=True, exist_ok=True)
+                return final_save_path
+            else:
+                # If save_path is not a string/Path, use default trajectory path
+                return self.get_trajectory_path(episode_num)
+        return None
+
+    def _apply_dark_theme(self, ax):
+        """Apply consistent dark theme styling to an axis."""
+        ax.set_facecolor("black")
+        ax.tick_params(colors="white")
+        ax.xaxis.label.set_color("white")
+        ax.yaxis.label.set_color("white")
+        ax.grid(True, alpha=0.3)
+        for spine in ax.spines.values():
+            spine.set_color("white")
 
     def create_training_metrics_plot(self, episode: int, env, training_logger, is_final: bool = False) -> None:
         """
@@ -134,14 +174,28 @@ class PlottingManager:
         plt.savefig(save_path, dpi=self.dpi, bbox_inches='tight')
         plt.close()
 
-    def plot_test_episode_trajectory(self, states: np.ndarray, actions: np.ndarray,
-                                     references: Optional[np.ndarray] = None,
-                                     errors: Optional[np.ndarray] = None,
-                                     rewards: Optional[List[float]] = None,
-                                     episode_num: Optional[int] = None,
-                                     save_path: Optional[str] = None,
-                                     tracked_indices: Optional[List[int]] = None,
-                                     reference_config: Optional[dict] = None) -> None:
+    # =========================================================================
+    # Environment-Specific Trajectory Plotting Methods
+    # =========================================================================
+
+    def plot_f16_trajectory(
+        self,
+        states: np.ndarray,
+        actions: np.ndarray,
+        references: Optional[np.ndarray] = None,
+        errors: Optional[np.ndarray] = None,
+        rewards: Optional[List[float]] = None,
+        episode_num: Optional[int] = None,
+        save_path: Optional[str] = None,
+        tracked_indices: Optional[List[int]] = None,
+        reference_config: Optional[dict] = None
+    ) -> None:
+        """
+        Plot trajectory for F16 environment with 7 states and 2 actions.
+
+        States: Altitude, Pitch, Velocity, AoA, Pitch Rate, Thrust, Elevator
+        Actions: Thrust Input, Elevator Input
+        """
         if not self.enabled:
             return
 
@@ -192,7 +246,7 @@ class PlottingManager:
             ax = axes[plot_idx]
             if i < states.shape[1]:  # Only plot if state exists
                 ax.plot(t, states[:, i], color="cyan", linewidth=2, label="State")
-                
+
                 # Overlay reference if it exists for this state
                 if references is not None and i < references.shape[1] and i in states_with_references:
                     # Extract only non-None reference values for plotting
@@ -202,34 +256,26 @@ class PlottingManager:
                         if ref_val is not None and not np.isnan(ref_val):
                             ref_values.append(ref_val)
                             ref_times.append(step_idx)
-                    
+
                     if ref_values:  # Only plot if we have non-None reference values
                         ax.plot(ref_times, ref_values, color="magenta", linestyle="--", linewidth=2, label="Reference")
                         ax.legend(loc="best", facecolor="black", edgecolor="white", labelcolor="white")
             else:
                 # State doesn't exist - show empty plot with label
                 ax.text(0.5, 0.5, 'No Data', transform=ax.transAxes, ha='center', va='center', color='white')
-            
-            ax.set_xlabel("Time Step", color="white")
-            ax.set_ylabel(state_labels[i] if i < len(state_labels) else f"State {i}", color="white")
-            ax.grid(True, alpha=0.3)
-            ax.set_facecolor("black")
-            ax.tick_params(colors="white")
-            for spine in ax.spines.values():
-                spine.set_color("white")
+
+            ax.set_xlabel("Time Step")
+            ax.set_ylabel(state_labels[i] if i < len(state_labels) else f"State {i}")
+            self._apply_dark_theme(ax)
             plot_idx += 1
 
         # Plot actions
         for i in range(actions.shape[1]):
             ax = axes[plot_idx]
             ax.plot(t, actions[:, i], color="yellow", linewidth=2)
-            ax.set_xlabel("Time Step", color="white")
-            ax.set_ylabel(action_labels[i] if i < len(action_labels) else f"Action {i}", color="white")
-            ax.grid(True, alpha=0.3)
-            ax.set_facecolor("black")
-            ax.tick_params(colors="white")
-            for spine in ax.spines.values():
-                spine.set_color("white")
+            ax.set_xlabel("Time Step")
+            ax.set_ylabel(action_labels[i] if i < len(action_labels) else f"Action {i}")
+            self._apply_dark_theme(ax)
             plot_idx += 1
 
         # Plot tracking errors (only for states with references)
@@ -244,13 +290,9 @@ class PlottingManager:
                     ax = axes[plot_idx]
                     ax.plot(t, errors_array[:, j], color="red", linestyle="--", linewidth=2)
                     label = state_labels[idx] if idx < len(state_labels) else f"State {idx}"
-                    ax.set_ylabel(f"{label} Tracking Error", color="white")
-                    ax.set_xlabel("Time Step", color="white")
-                    ax.grid(True, alpha=0.3)
-                    ax.set_facecolor("black")
-                    ax.tick_params(colors="white")
-                    for spine in ax.spines.values():
-                        spine.set_color("white")
+                    ax.set_xlabel("Time Step")
+                    ax.set_ylabel(f"{label} Tracking Error")
+                    self._apply_dark_theme(ax)
                     plot_idx += 1
 
         # Hide unused axes
@@ -259,7 +301,7 @@ class PlottingManager:
 
         # Figure title
         ep_str = f"Episode {episode_num + 1}" if episode_num is not None else "Test Episode"
-        title = f"{ep_str} — State, Action & Tracking Error Evolution"
+        title = f"{ep_str} — F16 State, Action & Tracking Error Evolution"
         if rewards is not None:
             title += f" (Total Reward: {sum(rewards):.1f})"
         fig.suptitle(title, color="white", fontsize=14, fontweight="bold", y=0.95)
@@ -267,19 +309,124 @@ class PlottingManager:
         plt.tight_layout()
         plt.subplots_adjust(top=0.88)
 
-        if save_path is not None:
-            # If save_path is provided, use it; otherwise save to trajectories directory
-            if isinstance(save_path, str) or isinstance(save_path, Path):
-                final_save_path = Path(save_path)
-                # Ensure parent directory exists
-                final_save_path.parent.mkdir(parents=True, exist_ok=True)
-            else:
-                final_save_path = self.get_trajectory_path(episode_num)
-            plt.savefig(final_save_path, facecolor="black", dpi=self.dpi)
+        # Save or show plot
+        final_save_path = self._resolve_save_path(save_path, episode_num)
+        if final_save_path:
+            plt.savefig(final_save_path, facecolor="black", dpi=self.dpi, bbox_inches="tight")
             plt.close()
         else:
             plt.show()
-            
+
+    def plot_lunarlander_trajectory(
+        self,
+        states: np.ndarray,
+        actions: np.ndarray,
+        rewards: Optional[List[float]] = None,
+        episode_num: Optional[int] = None,
+        save_path: Optional[str] = None
+    ) -> None:
+        """
+        Plot trajectory for LunarLander environment.
+
+        States: x, y, x_vel, y_vel, angle, angular_vel, left_leg_contact, right_leg_contact
+        Actions: main_engine, left/right_orientation
+        """
+        if not self.enabled:
+            return
+
+        # Align arrays
+        if len(states) > len(actions):
+            states = states[:-1]
+
+        state_labels = [
+            "X Position", "Y Position", "X Velocity", "Y Velocity",
+            "Angle [rad]", "Angular Velocity", "Left Leg Contact", "Right Leg Contact"
+        ]
+        action_labels = ["Main Engine", "Left/Right Orientation"]
+
+        t = np.arange(len(actions))
+
+        # Create figure with 2 rows
+        fig, axes = plt.subplots(2, 5, figsize=(18, 8), dpi=self.dpi)
+        fig.set_facecolor("black")
+        axes = axes.flatten()
+
+        plot_idx = 0
+
+        # Plot states
+        for i in range(min(8, states.shape[1])):
+            ax = axes[plot_idx]
+            ax.plot(t, states[:, i], color="cyan", linewidth=2)
+            ax.set_xlabel("Time Step")
+            ax.set_ylabel(state_labels[i] if i < len(state_labels) else f"State {i}")
+            self._apply_dark_theme(ax)
+            plot_idx += 1
+
+        # Plot actions
+        for i in range(actions.shape[1]):
+            ax = axes[plot_idx]
+            ax.plot(t, actions[:, i], color="yellow", linewidth=2)
+            ax.set_xlabel("Time Step")
+            ax.set_ylabel(action_labels[i] if i < len(action_labels) else f"Action {i}")
+            self._apply_dark_theme(ax)
+            plot_idx += 1
+
+        # Hide unused axes
+        for i in range(plot_idx, len(axes)):
+            axes[i].axis("off")
+
+        # Figure title
+        ep_str = f"Episode {episode_num + 1}" if episode_num is not None else "Test Episode"
+        title = f"{ep_str} — LunarLander Trajectory"
+        if rewards is not None:
+            title += f" (Total Reward: {sum(rewards):.1f})"
+        fig.suptitle(title, color="white", fontsize=14, fontweight="bold", y=0.95)
+
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.92)
+
+        # Save or show plot
+        final_save_path = self._resolve_save_path(save_path, episode_num)
+        if final_save_path:
+            plt.savefig(final_save_path, facecolor="black", dpi=self.dpi, bbox_inches="tight")
+            plt.close()
+        else:
+            plt.show()
+
+    # =========================================================================
+    # Backward Compatibility
+    # =========================================================================
+
+    def plot_test_episode_trajectory(self, states: np.ndarray, actions: np.ndarray,
+                                     references: Optional[np.ndarray] = None,
+                                     errors: Optional[np.ndarray] = None,
+                                     rewards: Optional[List[float]] = None,
+                                     episode_num: Optional[int] = None,
+                                     save_path: Optional[str] = None,
+                                     tracked_indices: Optional[List[int]] = None,
+                                     reference_config: Optional[dict] = None) -> None:
+        """
+        Legacy method for backward compatibility. Defaults to F16 trajectory plotting.
+
+        Deprecated: Use plot_f16_trajectory, plot_lunarlander_trajectory, or
+        plot_shortperiod_trajectory instead for clearer environment-specific plotting.
+        """
+        return self.plot_f16_trajectory(
+            states=states,
+            actions=actions,
+            references=references,
+            errors=errors,
+            rewards=rewards,
+            episode_num=episode_num,
+            save_path=save_path,
+            tracked_indices=tracked_indices,
+            reference_config=reference_config
+        )
+
+    # =========================================================================
+    # Video Recording
+    # =========================================================================
+
     def save_episode_video(self, env, episode_num: Optional[int] = None) -> None:
         """
         Save a video of the episode from recorded frames.
@@ -309,7 +456,7 @@ class PlottingManager:
         rewards: List[float],
         episode_num: Optional[int] = None,
         save_path: Optional[str] = None,
-    ):
+    ) -> None:
         """
         Plot trajectory specifically for short-period dynamics environment.
 
@@ -326,6 +473,7 @@ class PlottingManager:
             return
 
         fig, axes = plt.subplots(2, 3, figsize=(15, 8), dpi=self.dpi)
+        fig.patch.set_facecolor("black")
         axes = axes.flatten()
 
         timesteps = np.arange(len(states))
@@ -336,91 +484,69 @@ class PlottingManager:
         ax = axes[0]
         ax.plot(time, states[:, 0], color="cyan", linewidth=2, label="Alpha")
         ax.plot(time, alpha_refs, color="magenta", linestyle="--", linewidth=2, label="Alpha Reference")
-        ax.set_xlabel("Time (s)", color="white")
-        ax.set_ylabel("Alpha (rad)", color="white")
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Alpha (rad)")
         ax.legend(loc="best", facecolor="black", edgecolor="white", labelcolor="white")
-        ax.grid(True, alpha=0.3)
-        ax.set_facecolor("black")
-        ax.tick_params(colors="white")
-        for spine in ax.spines.values():
-            spine.set_color("white")
+        self._apply_dark_theme(ax)
 
         # Plot 2: Pitch rate (q)
         ax = axes[1]
         ax.plot(time, states[:, 1], color="cyan", linewidth=2, label="q (pitch rate)")
-        ax.set_xlabel("Time (s)", color="white")
-        ax.set_ylabel("q (rad/s)", color="white")
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("q (rad/s)")
         ax.legend(loc="best", facecolor="black", edgecolor="white", labelcolor="white")
-        ax.grid(True, alpha=0.3)
-        ax.set_facecolor("black")
-        ax.tick_params(colors="white")
-        for spine in ax.spines.values():
-            spine.set_color("white")
+        self._apply_dark_theme(ax)
 
         # Plot 3: Action (elevator deflection)
         ax = axes[2]
         ax.plot(time, actions[:, 0], color="yellow", linewidth=2, label="Elevator")
-        ax.set_xlabel("Time (s)", color="white")
-        ax.set_ylabel("Delta_e (rad)", color="white")
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Delta_e (deg)")
         ax.legend(loc="best", facecolor="black", edgecolor="white", labelcolor="white")
-        ax.grid(True, alpha=0.3)
-        ax.set_facecolor("black")
-        ax.tick_params(colors="white")
-        for spine in ax.spines.values():
-            spine.set_color("white")
+        self._apply_dark_theme(ax)
 
         # Plot 4: Tracking error
         ax = axes[3]
         ax.plot(time, tracking_errors, color="red", linestyle="--", linewidth=2, label="Tracking Error")
         ax.axhline(y=0, color="white", linestyle=":", alpha=0.5)
-        ax.set_xlabel("Time (s)", color="white")
-        ax.set_ylabel("Alpha Error (rad)", color="white")
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Alpha Error (rad)")
         ax.legend(loc="best", facecolor="black", edgecolor="white", labelcolor="white")
-        ax.grid(True, alpha=0.3)
-        ax.set_facecolor("black")
-        ax.tick_params(colors="white")
-        for spine in ax.spines.values():
-            spine.set_color("white")
+        self._apply_dark_theme(ax)
 
         # Plot 5: Rewards
         ax = axes[4]
         ax.plot(time, rewards, color="green", linewidth=2, label="Reward")
-        ax.set_xlabel("Time (s)", color="white")
-        ax.set_ylabel("Reward", color="white")
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Reward")
         ax.legend(loc="best", facecolor="black", edgecolor="white", labelcolor="white")
-        ax.grid(True, alpha=0.3)
-        ax.set_facecolor("black")
-        ax.tick_params(colors="white")
-        for spine in ax.spines.values():
-            spine.set_color("white")
+        self._apply_dark_theme(ax)
 
         # Plot 6: Cumulative reward
         ax = axes[5]
         cumulative_reward = np.cumsum(rewards)
         ax.plot(time, cumulative_reward, color="lime", linewidth=2, label="Cumulative Reward")
-        ax.set_xlabel("Time (s)", color="white")
-        ax.set_ylabel("Cumulative Reward", color="white")
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Cumulative Reward")
         ax.legend(loc="best", facecolor="black", edgecolor="white", labelcolor="white")
-        ax.grid(True, alpha=0.3)
-        ax.set_facecolor("black")
-        ax.tick_params(colors="white")
-        for spine in ax.spines.values():
-            spine.set_color("white")
+        self._apply_dark_theme(ax)
 
         # Figure title
         ep_str = f"Episode {episode_num + 1}" if episode_num is not None else "Test Episode"
         total_reward = sum(rewards)
         fig.suptitle(
-            f"{ep_str} - Short-Period Dynamics | Total Reward: {total_reward:.2f}",
+            f"{ep_str} — Short-Period Dynamics | Total Reward: {total_reward:.2f}",
             fontsize=14,
             color="white",
             y=0.98
         )
-        fig.patch.set_facecolor("black")
 
         plt.tight_layout(rect=[0, 0, 1, 0.96])
 
-        if save_path:
-            plt.savefig(save_path, facecolor="black", dpi=self.dpi, bbox_inches="tight")
-
-        plt.close(fig)
+        # Save or show plot
+        final_save_path = self._resolve_save_path(save_path, episode_num)
+        if final_save_path:
+            plt.savefig(final_save_path, facecolor="black", dpi=self.dpi, bbox_inches="tight")
+            plt.close()
+        else:
+            plt.show()

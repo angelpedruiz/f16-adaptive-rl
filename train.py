@@ -15,6 +15,7 @@ from tqdm import tqdm
 import importlib
 import argparse
 from datetime import datetime
+from typing import Dict, Any, Optional
 
 # Add project root to path
 sys.path.append(str(Path(__file__).resolve().parent))
@@ -70,263 +71,488 @@ def setup_run_directory(config: dict, agent_name: str, resume_from: str = None) 
         return run_dir
 
 
-def train_agent(env_config_path: str, agent_config_path: str, resume_from: str = None):
+class Trainer:
     """
-    Main training function that orchestrates the entire training process.
+    Unified trainer class for F16 Adaptive RL project.
 
-    Args:
-        env_config_path: Path to the environment configuration file
-        agent_config_path: Path to the agent configuration file
-        resume_from: Optional path to checkpoint to resume training from
+    Handles setup, configuration, and environment-specific training loops.
+    Supports checkpointing, plotting, logging, and performance profiling.
     """
-    # Load and validate configuration
-    env_config = load_config(env_config_path)
-    agent_config = load_config(agent_config_path)
-    
-    # Combine configs for validation and other processing
-    config = {
-        "agent": agent_config,
-        "environment": env_config,
-        "training": env_config.get("training", {}),
-        "plotting": env_config.get("plotting", {}),
-        "checkpointing": env_config.get("checkpointing", {}),
-        "evaluation": env_config.get("evaluation", {})
-    }
-    validate_config(config)
 
-    # Extract configuration sections
-    training_config = config["training"]
-    plotting_config = config["plotting"]
-    checkpoint_config = config["checkpointing"]
+    def __init__(self, env_config_path: str, agent_config_path: str, resume_from: Optional[str] = None):
+        """
+        Initialize trainer with configuration files.
 
-    # Set random seed for reproducibility
-    if "seed" in training_config:
-        np.random.seed(training_config["seed"])
-        # Set PyTorch seed if available
-        try:
-            import torch
+        Args:
+            env_config_path: Path to environment configuration file
+            agent_config_path: Path to agent configuration file
+            resume_from: Optional checkpoint path to resume training
+        """
+        # Load and validate configuration
+        self.env_config = load_config(env_config_path)
+        self.agent_config = load_config(agent_config_path)
+        self.resume_from = resume_from
 
-            torch.manual_seed(training_config["seed"])
-        except ImportError:
-            pass
+        # Combine configs for validation
+        self.config = {
+            "agent": self.agent_config,
+            "environment": self.env_config,
+            "training": self.env_config.get("training", {}),
+            "plotting": self.env_config.get("plotting", {}),
+            "checkpointing": self.env_config.get("checkpointing", {}),
+            "evaluation": self.env_config.get("evaluation", {})
+        }
+        validate_config(self.config)
 
-    # Create environment with RecordEpisodeStatistics wrapper
-    env = create_environment(env_config)
-    env = gym.wrappers.RecordEpisodeStatistics(
-        env, buffer_length=training_config["episodes"]
-    )
+        # Extract configuration sections
+        self.training_config = self.config["training"]
+        self.plotting_config = self.config["plotting"]
+        self.checkpoint_config = self.config["checkpointing"]
 
-    # For performance testing - access the unwrapped environment
-    base_env = env.unwrapped if hasattr(env, "unwrapped") else env
+        # Set random seed for reproducibility
+        self._set_random_seed()
 
-    # Create agent
-    agent = create_agent(agent_config, env)
+        # Create environment and agent
+        self.env = self._create_environment()
+        self.base_env = self.env.unwrapped if hasattr(self.env, "unwrapped") else self.env
+        self.agent = create_agent(self.agent_config, self.env)
 
-    # Setup run directory
-    run_dir = setup_run_directory(config, agent_config["type"], resume_from)
+        # Setup run directory
+        self.run_dir = setup_run_directory(self.config, self.agent_config["type"], resume_from)
 
-    # Initialize managers
-    checkpoint_manager = CheckpointManager(
-        run_dir, checkpoint_config, agent_config["type"]
-    )
+        # Initialize managers
+        self.checkpoint_manager = CheckpointManager(
+            self.run_dir, self.checkpoint_config, self.agent_config["type"]
+        )
+        self.plotting_manager = PlottingManager(self.run_dir, self.plotting_config)
+        self.training_logger = TrainingLogger(self.run_dir, self.training_config)
 
-    plotting_manager = PlottingManager(run_dir, plotting_config)
-
-    training_logger = TrainingLogger(run_dir, training_config)
-
-    # Create videos directory for lunar lander environments
-    videos_dir = run_dir / "videos"
-    videos_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Check if environment is lunar lander type
-    is_lunar_lander = "lunar" in env_config.get("name", "").lower() or "lunarlander" in env_config.get("name", "").lower()
-
-    # Handle resume from checkpoint
-    start_episode = 0
-    if resume_from:
-        start_episode = checkpoint_manager.load_checkpoint(resume_from, agent, env)
-        # Restore training logger state from checkpoint
-        training_logger.restore_from_checkpoint(checkpoint_manager)
-        print(f"Resumed training from episode {start_episode}")
-        print(f"Training metrics restored: {training_logger.is_resuming()}")
-
-    # Training parameters
-    total_episodes = training_config["episodes"]
-
-    # Plotting configuration
-    metrics_interval = plotting_config["training_metrics"].get("interval", 500)
-    trajectories_interval = plotting_config["trajectories"].get("interval", 150)
-
-    # Print training summary
-    if resume_from:
-        print("Resuming F16 Adaptive RL Training")
-        print("=" * 50)
-        print(f"Agent:           {agent_config['type']}")
-        print(f"Environment:     {env_config['name']}")
-        print(f"Total Episodes:  {total_episodes}")
-        print(f"Resume From:     Episode {start_episode}")
-        print(f"Episodes Left:   {total_episodes - start_episode}")
-        print(f"Resumed From:    {resume_from}")
-        print(f"Results Dir:     {run_dir} (continuing)")
-        print("=" * 50)
-        print()
-    else:
-        print("Starting F16 Adaptive RL Training")
-        print("=" * 50)
-        print(f"Agent:           {agent_config['type']}")
-        print(f"Environment:     {env_config['name']}")
-        print(f"Total Episodes:  {total_episodes}")
-        print(f"Start Episode:   {start_episode}")
-        print(f"Results Dir:     {run_dir}")
-        print("=" * 50)
-        print()
-
-    # Training loop with profiling
-    start_time = time.time()
-
-    # Profiling variables
-    times_reset = []
-    times_get_action = []
-    times_env_step = []
-    times_agent_update = []
-    times_logging = []
-    times_episode_total = []
-
-    # Initialize episode variable to prevent UnboundLocalError
-    episode = start_episode - 1
-
-    # Create initial plots if resuming to show continuity
-    if resume_from and start_episode > 0:
-        try:
-            plotting_manager.create_training_metrics_plot(
-                start_episode - 1, env, training_logger, is_final=False
+        # Handle checkpoint resumption
+        self.start_episode = 0
+        if resume_from:
+            self.start_episode = self.checkpoint_manager.load_checkpoint(
+                resume_from, self.agent, self.env
             )
-            print(
-                f"Created resumption plot showing metrics up to episode {start_episode}"
-            )
-        except Exception as e:
-            print(f"Warning: Could not create resumption plot: {e}")
-            
-#============================================================================
-# Main training loop
-#============================================================================
+            self.training_logger.restore_from_checkpoint(self.checkpoint_manager)
+            print(f"Resumed training from episode {self.start_episode}")
+            print(f"Training metrics restored: {self.training_logger.is_resuming()}")
 
-    try:
-        for episode in tqdm(
-            range(start_episode, total_episodes),
-            desc="Training Progress",
-            mininterval=1.0,
-        ):
-            episode_start = time.time()
+        # Training parameters
+        self.total_episodes = self.training_config["episodes"]
+        self.metrics_interval = self.plotting_config["training_metrics"].get("interval", 500)
+        self.trajectories_interval = self.plotting_config["trajectories"].get("interval", 150)
 
-            # Reset environment for new episode
-            reset_start = time.time()
-            obs, info = env.reset()
-            if episode < 10:  # Only profile first 10 episodes
-                times_reset.append(time.time() - reset_start)
-            done = False
+        # Profiling data
+        self.profiling = {
+            "times_reset": [],
+            "times_get_action": [],
+            "times_env_step": [],
+            "times_agent_update": [],
+            "times_logging": [],
+            "times_episode_total": []
+        }
 
-            # Record trajectories
-            record_data = (
-                (episode + 1) % trajectories_interval == 0
-                and plotting_config.get("enabled", True)
-                and plotting_config["trajectories"].get("save_data", True)
-            )
+    def _set_random_seed(self) -> None:
+        """Set random seeds for reproducibility."""
+        if "seed" in self.training_config:
+            np.random.seed(self.training_config["seed"])
+            try:
+                import torch
+                torch.manual_seed(self.training_config["seed"])
+            except ImportError:
+                pass
 
-            if record_data and not is_lunar_lander:
-                # Pre-allocate arrays for trajectory recording (non-lunar lander)
-                max_episode_steps = training_config.get("max_steps", 3000)
-                state_trajectory = []
-                action_trajectory = []
-                reference_trajectory = []
-                errors_trajectory = []
-                reward_trajectory = []
-                alpha_ref_trajectory = []  # For shortperiod environment
-                step_count = 0
-                current_env = env
-            elif record_data and is_lunar_lander:
-                # Setup video recording for lunar lander
-                video_env = gym.wrappers.RecordVideo(
-                    env,
-                    video_folder=str(videos_dir),
-                    name_prefix=f"episode_{episode + 1}",
-                    episode_trigger=lambda x: True
+    def _create_environment(self):
+        """Create environment with RecordEpisodeStatistics wrapper."""
+        env = create_environment(self.env_config)
+        env = gym.wrappers.RecordEpisodeStatistics(
+            env, buffer_length=self.training_config["episodes"]
+        )
+        return env
+
+    def _print_training_header(self) -> None:
+        """Print training session header."""
+        if self.resume_from:
+            print("Resuming F16 Adaptive RL Training")
+            print("=" * 50)
+            print(f"Agent:           {self.agent_config['type']}")
+            print(f"Environment:     {self.env_config['name']}")
+            print(f"Total Episodes:  {self.total_episodes}")
+            print(f"Resume From:     Episode {self.start_episode}")
+            print(f"Episodes Left:   {self.total_episodes - self.start_episode}")
+            print(f"Resumed From:    {self.resume_from}")
+            print(f"Results Dir:     {self.run_dir} (continuing)")
+            print("=" * 50)
+            print()
+        else:
+            print("Starting F16 Adaptive RL Training")
+            print("=" * 50)
+            print(f"Agent:           {self.agent_config['type']}")
+            print(f"Environment:     {self.env_config['name']}")
+            print(f"Total Episodes:  {self.total_episodes}")
+            print(f"Start Episode:   {self.start_episode}")
+            print(f"Results Dir:     {self.run_dir}")
+            print("=" * 50)
+            print()
+
+    def _create_resumption_plot(self) -> None:
+        """Create initial plot when resuming to show continuity."""
+        if self.resume_from and self.start_episode > 0:
+            try:
+                self.plotting_manager.create_training_metrics_plot(
+                    self.start_episode - 1, self.env, self.training_logger, is_final=False
                 )
-                current_env = video_env
-                obs, info = current_env.reset()
-            else:
-                current_env = env
+                print(f"Created resumption plot showing metrics up to episode {self.start_episode}")
+            except Exception as e:
+                print(f"Warning: Could not create resumption plot: {e}")
 
-            #============================================================================
-            # Single episode loop
-            #============================================================================
-            while not done:
-                # Get action from agent
-                action_start = time.time()
-                action = agent.get_action(obs)
-                # Only collect profiling data for first few episodes to prevent memory issues
-                if episode < 5:
-                    times_get_action.append(time.time() - action_start)
+    def _should_record_trajectory(self, episode: int) -> bool:
+        """Determine if trajectory should be recorded this episode."""
+        return (
+            (episode + 1) % self.trajectories_interval == 0
+            and self.plotting_config.get("enabled", True)
+            and self.plotting_config["trajectories"].get("save_data", True)
+        )
 
-                # Take step in environment (use current_env for video recording)
-                step_start = time.time()
-                next_obs, reward, terminated, truncated, info = current_env.step(action)
-                if episode < 5:
-                    times_env_step.append(time.time() - step_start)
+    def _run_episode_step(self, obs, action, current_env, episode: int):
+        """Execute a single environment step with profiling."""
+        # Take step in environment
+        step_start = time.time()
+        next_obs, reward, terminated, truncated, info = current_env.step(action)
+        if episode < 5:
+            self.profiling["times_env_step"].append(time.time() - step_start)
 
-                # Update agent
-                update_start = time.time()
-                agent.update(obs, action, reward, terminated, next_obs)
-                if episode < 5:
-                    times_agent_update.append(time.time() - update_start)
+        # Update agent
+        update_start = time.time()
+        self.agent.update(obs, action, reward, terminated, next_obs)
+        if episode < 5:
+            self.profiling["times_agent_update"].append(time.time() - update_start)
 
-                # Record trajectories only for non-lunar lander environments
-                if record_data and not is_lunar_lander:
-                    # Use copy to avoid reference issues and optimize access
-                    state_trajectory.append(env.env.state.copy() if hasattr(env.env.state, "copy") else env.env.state)
-                    action_trajectory.append(action)
-                    reference_trajectory.append(info.get("reference", None))
-                    errors_trajectory.append(info.get("tracking_error", None))
-                    reward_trajectory.append(reward)
-                    alpha_ref_trajectory.append(info.get("alpha_ref", None))  # For shortperiod
-                    step_count += 1
-                    
-                # Move to next state
-                obs = next_obs
-                done = terminated or truncated
+        return next_obs, reward, terminated, truncated, info
 
-            # Close video recording if it was active
-            if record_data and is_lunar_lander:
-                current_env.close()
+    def _post_episode_processing(self, episode: int, logging_start: float) -> None:
+        """Handle post-episode logging, checkpointing, and plotting."""
+        # Update training logger
+        self.training_logger.log_episode(episode, self.env, self.agent)
 
-            # Post-episode processing with timing
-            logging_start = time.time()
+        # Save checkpoint if needed
+        if self.checkpoint_manager.should_save_checkpoint(episode):
+            self.checkpoint_manager.save_checkpoint(episode, self.agent, self.env, self.training_logger)
 
-            # Update training logger
-            training_logger.log_episode(episode, env, agent)
+        # Create training metrics plots
+        if (episode + 1) % self.metrics_interval == 0 or episode == 0:
+            self.plotting_manager.create_training_metrics_plot(episode, self.env, self.training_logger)
 
-            # Save checkpoint if needed
-            if checkpoint_manager.should_save_checkpoint(episode):
-                checkpoint_manager.save_checkpoint(episode, agent, env, training_logger)
+        # Decay exploration if agent supports it
+        if hasattr(self.agent, "decay_epsilon"):
+            self.agent.decay_epsilon()
+        elif hasattr(self.agent, "decay_exploration"):
+            self.agent.decay_exploration()
 
-            # Create training metrics plots
-            if (episode + 1) % metrics_interval == 0 or episode == 0:
-                plotting_manager.create_training_metrics_plot(
-                    episode, env, training_logger
-                )
+        # Track logging time
+        if episode < 10:
+            self.profiling["times_logging"].append(time.time() - logging_start)
 
-            # Create trajectory plots (only for non-lunar lander when data was recorded)
-            if record_data and not is_lunar_lander:
-                states = np.array(state_trajectory)
-                actions = np.array(action_trajectory)
-                save_path = plotting_manager.get_trajectory_path(episode)
+    def _finalize_training(self, episode: int, start_time: float) -> None:
+        """Save final results and print summary."""
+        print("\nSaving final results...")
 
-                # Check if this is shortperiod environment
-                is_shortperiod = "shortperiod" in env_config.get("name", "").lower()
+        # Final checkpoint
+        final_episode = max(episode, self.start_episode)
+        self.checkpoint_manager.save_checkpoint(
+            final_episode, self.agent, self.env, self.training_logger, is_final=True
+        )
 
-                if is_shortperiod and alpha_ref_trajectory:
-                    # Use specialized shortperiod plotting
-                    plotting_manager.plot_shortperiod_trajectory(
+        # Final plots
+        self.plotting_manager.create_training_metrics_plot(
+            final_episode, self.env, self.training_logger, is_final=True
+        )
+
+        # Training summary
+        training_time = time.time() - start_time
+        self.training_logger.save_final_summary(final_episode, training_time)
+
+        # Create session summary
+        create_session_summary(
+            self.run_dir,
+            self.config,
+            final_episode,
+            self.start_episode,
+            training_time,
+            self.resume_from,
+            self.env,
+            self.agent,
+            self.training_logger,
+        )
+
+        # Performance analysis
+        self._print_performance_analysis(training_time, final_episode)
+
+    def _print_performance_analysis(self, training_time: float, final_episode: int) -> None:
+        """Print detailed performance analysis."""
+        if self.profiling["times_episode_total"]:
+            avg_episode_time = np.mean(self.profiling["times_episode_total"])
+            episodes_per_sec = 1.0 / avg_episode_time if avg_episode_time > 0 else 0
+
+            print("\nPerformance Analysis:")
+            print(f"Episodes completed: {len(self.profiling['times_episode_total'])}")
+            print(f"Average episode time: {avg_episode_time * 1000:.1f}ms")
+            print(f"Episodes per second: {episodes_per_sec:.2f}")
+            print(f"Average reset time: {np.mean(self.profiling['times_reset']) * 1000:.2f}ms")
+            print(f"Average action time: {np.mean(self.profiling['times_get_action']) * 1000:.2f}ms")
+            print(f"Average env step time: {np.mean(self.profiling['times_env_step']) * 1000:.2f}ms")
+            print(f"Average agent update time: {np.mean(self.profiling['times_agent_update']) * 1000:.2f}ms")
+            print(f"Average logging time: {np.mean(self.profiling['times_logging']) * 1000:.2f}ms")
+
+        print("\nTraining Complete!")
+        if self.resume_from:
+            print(f"Total Episodes Completed: {final_episode + 1}")
+            print(f"Episodes in This Session: {final_episode + 1 - self.start_episode}")
+            print(f"Session Training Time: {training_time / 60:.1f} minutes")
+            print(f"Cumulative results saved in: {self.run_dir}")
+        else:
+            print(f"Total Episodes: {final_episode + 1}")
+            print(f"Training Time:  {training_time / 60:.1f} minutes")
+            print(f"Results saved in: {self.run_dir}")
+
+    # =========================================================================
+    # Environment-Specific Training Methods
+    # =========================================================================
+
+    def train_f16(self) -> None:
+        """Training loop for F16 environment with full state tracking."""
+        self._print_training_header()
+        self._create_resumption_plot()
+
+        start_time = time.time()
+        episode = self.start_episode - 1
+
+        try:
+            for episode in tqdm(
+                range(self.start_episode, self.total_episodes),
+                desc="Training F16",
+                mininterval=1.0,
+            ):
+                episode_start = time.time()
+
+                # Reset environment
+                reset_start = time.time()
+                obs, info = self.env.reset()
+                if episode < 10:
+                    self.profiling["times_reset"].append(time.time() - reset_start)
+                done = False
+
+                # Trajectory recording setup
+                record_data = self._should_record_trajectory(episode)
+                if record_data:
+                    state_trajectory = []
+                    action_trajectory = []
+                    reference_trajectory = []
+                    errors_trajectory = []
+                    reward_trajectory = []
+
+                # Episode loop
+                while not done:
+                    # Get action
+                    action_start = time.time()
+                    action = self.agent.get_action(obs)
+                    if episode < 5:
+                        self.profiling["times_get_action"].append(time.time() - action_start)
+
+                    # Step environment
+                    next_obs, reward, terminated, truncated, info = self._run_episode_step(
+                        obs, action, self.env, episode
+                    )
+
+                    # Record trajectory data
+                    if record_data:
+                        state_trajectory.append(
+                            self.env.env.state.copy() if hasattr(self.env.env.state, "copy") else self.env.env.state
+                        )
+                        action_trajectory.append(action)
+                        reference_trajectory.append(info.get("reference", None))
+                        errors_trajectory.append(info.get("tracking_error", None))
+                        reward_trajectory.append(reward)
+
+                    obs = next_obs
+                    done = terminated or truncated
+
+                # Post-episode processing
+                logging_start = time.time()
+                self._post_episode_processing(episode, logging_start)
+
+                # Create trajectory plot
+                if record_data:
+                    states = np.array(state_trajectory)
+                    actions = np.array(action_trajectory)
+                    save_path = self.plotting_manager.get_trajectory_path(episode)
+
+                    self.plotting_manager.plot_f16_trajectory(
+                        states=states,
+                        actions=actions,
+                        references=np.array(reference_trajectory),
+                        errors=np.array(errors_trajectory),
+                        rewards=reward_trajectory,
+                        episode_num=episode,
+                        save_path=str(save_path),
+                        reference_config=getattr(self.base_env, "reference_config", None),
+                    )
+
+                if episode < 10:
+                    self.profiling["times_episode_total"].append(time.time() - episode_start)
+
+        except KeyboardInterrupt:
+            print("\nTraining interrupted by user")
+        finally:
+            self._finalize_training(episode, start_time)
+
+    def train_lunarlander(self) -> None:
+        """Training loop for LunarLander environment with video recording."""
+        self._print_training_header()
+        self._create_resumption_plot()
+
+        # Create videos directory
+        videos_dir = self.run_dir / "videos"
+        videos_dir.mkdir(parents=True, exist_ok=True)
+
+        start_time = time.time()
+        episode = self.start_episode - 1
+
+        try:
+            for episode in tqdm(
+                range(self.start_episode, self.total_episodes),
+                desc="Training LunarLander",
+                mininterval=1.0,
+            ):
+                episode_start = time.time()
+
+                # Setup video recording if needed
+                record_data = self._should_record_trajectory(episode)
+                if record_data:
+                    video_env = gym.wrappers.RecordVideo(
+                        self.env,
+                        video_folder=str(videos_dir),
+                        name_prefix=f"episode_{episode + 1}",
+                        episode_trigger=lambda x: True
+                    )
+                    current_env = video_env
+                    obs, info = current_env.reset()
+                else:
+                    current_env = self.env
+                    reset_start = time.time()
+                    obs, info = self.env.reset()
+                    if episode < 10:
+                        self.profiling["times_reset"].append(time.time() - reset_start)
+
+                done = False
+
+                # Episode loop
+                while not done:
+                    # Get action
+                    action_start = time.time()
+                    action = self.agent.get_action(obs)
+                    if episode < 5:
+                        self.profiling["times_get_action"].append(time.time() - action_start)
+
+                    # Step environment
+                    next_obs, reward, terminated, truncated, info = self._run_episode_step(
+                        obs, action, current_env, episode
+                    )
+
+                    obs = next_obs
+                    done = terminated or truncated
+
+                # Close video recording if active
+                if record_data:
+                    current_env.close()
+
+                # Post-episode processing
+                logging_start = time.time()
+                self._post_episode_processing(episode, logging_start)
+
+                if episode < 10:
+                    self.profiling["times_episode_total"].append(time.time() - episode_start)
+
+        except KeyboardInterrupt:
+            print("\nTraining interrupted by user")
+        finally:
+            self._finalize_training(episode, start_time)
+
+            # Video summary
+            if self.plotting_config.get("enabled", True):
+                video_files = list(videos_dir.glob("*.mp4"))
+                if video_files:
+                    print(f"Videos saved: {len(video_files)} episodes recorded in {videos_dir}")
+
+    def train_shortperiod(self) -> None:
+        """Training loop for short-period dynamics environment."""
+        self._print_training_header()
+        self._create_resumption_plot()
+
+        start_time = time.time()
+        episode = self.start_episode - 1
+
+        try:
+            for episode in tqdm(
+                range(self.start_episode, self.total_episodes),
+                desc="Training ShortPeriod",
+                mininterval=1.0,
+            ):
+                episode_start = time.time()
+
+                # Reset environment
+                reset_start = time.time()
+                obs, info = self.env.reset()
+                if episode < 10:
+                    self.profiling["times_reset"].append(time.time() - reset_start)
+                done = False
+
+                # Trajectory recording setup
+                record_data = self._should_record_trajectory(episode)
+                if record_data:
+                    state_trajectory = []
+                    action_trajectory = []
+                    alpha_ref_trajectory = []
+                    errors_trajectory = []
+                    reward_trajectory = []
+
+                # Episode loop
+                while not done:
+                    # Get action
+                    action_start = time.time()
+                    action = self.agent.get_action(obs)
+                    if episode < 5:
+                        self.profiling["times_get_action"].append(time.time() - action_start)
+
+                    # Step environment
+                    next_obs, reward, terminated, truncated, info = self._run_episode_step(
+                        obs, action, self.env, episode
+                    )
+
+                    # Record trajectory data
+                    if record_data:
+                        state_trajectory.append(
+                            self.env.env.state.copy() if hasattr(self.env.env.state, "copy") else self.env.env.state
+                        )
+                        action_trajectory.append(action)
+                        alpha_ref_trajectory.append(info.get("alpha_ref", None))
+                        errors_trajectory.append(info.get("tracking_error", None))
+                        reward_trajectory.append(reward)
+
+                    obs = next_obs
+                    done = terminated or truncated
+
+                # Post-episode processing
+                logging_start = time.time()
+                self._post_episode_processing(episode, logging_start)
+
+                # Create trajectory plot
+                if record_data and alpha_ref_trajectory:
+                    states = np.array(state_trajectory)
+                    actions = np.array(action_trajectory)
+                    save_path = self.plotting_manager.get_trajectory_path(episode)
+
+                    self.plotting_manager.plot_shortperiod_trajectory(
                         states=states,
                         actions=actions,
                         alpha_refs=np.array(alpha_ref_trajectory),
@@ -335,97 +561,44 @@ def train_agent(env_config_path: str, agent_config_path: str, resume_from: str =
                         episode_num=episode,
                         save_path=str(save_path),
                     )
-                else:
-                    # Use general trajectory plotting
-                    plotting_manager.plot_test_episode_trajectory(
-                        states=states,
-                        actions=actions,
-                        references=np.array(reference_trajectory),
-                        errors=np.array(errors_trajectory),
-                        rewards=reward_trajectory,
-                        episode_num=episode,
-                        save_path=str(save_path),
-                        reference_config=getattr(base_env, "reference_config", None),
-                    )
 
-            # Decay exploration parameters if agent supports it
-            if hasattr(agent, "decay_epsilon"):
-                agent.decay_epsilon()
-            elif hasattr(agent, "decay_exploration"):
-                agent.decay_exploration()
+                if episode < 10:
+                    self.profiling["times_episode_total"].append(time.time() - episode_start)
 
-            if episode < 10:  # Only profile first 10 episodes
-                times_logging.append(time.time() - logging_start)
-                times_episode_total.append(time.time() - episode_start)
+        except KeyboardInterrupt:
+            print("\nTraining interrupted by user")
+        finally:
+            self._finalize_training(episode, start_time)
 
-    except KeyboardInterrupt:
-        print("\nTraining interrupted by user")
+    def train(self) -> None:
+        """
+        Main training entry point that dispatches to environment-specific method.
+        """
+        env_name = self.env_config.get("name", "").lower()
 
-    finally:
-        # Always save final checkpoint and plots
-        print("\nSaving final results...")
-
-        # Final checkpoint (ensure episode is valid)
-        final_episode = max(episode, start_episode)
-        checkpoint_manager.save_checkpoint(
-            final_episode, agent, env, training_logger, is_final=True
-        )
-
-        # Final plots
-        plotting_manager.create_training_metrics_plot(
-            final_episode, env, training_logger, is_final=True
-        )
-
-        # Training summary
-        training_time = time.time() - start_time
-        training_logger.save_final_summary(final_episode, training_time)
-
-        # Create session summary
-        create_session_summary(
-            run_dir,
-            config,
-            final_episode,
-            start_episode,
-            training_time,
-            resume_from,
-            env,
-            agent,
-            training_logger,
-        )
-
-        # Performance analysis
-        if times_episode_total and len(times_episode_total) > 0:
-            avg_episode_time = np.mean(times_episode_total)
-            episodes_per_sec = 1.0 / avg_episode_time if avg_episode_time > 0 else 0
-
-            print("\nPerformance Analysis:")
-            print(f"Episodes completed: {len(times_episode_total)}")
-            print(f"Average episode time: {avg_episode_time * 1000:.1f}ms")
-            print(f"Episodes per second: {episodes_per_sec:.2f}")
-            print(f"Average reset time: {np.mean(times_reset) * 1000:.2f}ms")
-            print(f"Average action time: {np.mean(times_get_action) * 1000:.2f}ms")
-            print(f"Average env step time: {np.mean(times_env_step) * 1000:.2f}ms")
-            print(
-                f"Average agent update time: {np.mean(times_agent_update) * 1000:.2f}ms"
-            )
-            print(f"Average logging time: {np.mean(times_logging) * 1000:.2f}ms")
-
-        print("\nTraining Complete!")
-        if resume_from:
-            print(f"Total Episodes Completed: {max(episode + 1, start_episode)}")
-            print(f"Episodes in This Session: {max(episode + 1 - start_episode, 0)}")
-            print(f"Session Training Time: {training_time / 60:.1f} minutes")
-            print(f"Cumulative results saved in: {run_dir}")
+        if "lunarlander" in env_name or "lunar" in env_name:
+            self.train_lunarlander()
+        elif "shortperiod" in env_name or "short" in env_name:
+            self.train_shortperiod()
+        elif "f16" in env_name:
+            self.train_f16()
         else:
-            print(f"Total Episodes: {max(episode + 1, start_episode)}")
-            print(f"Training Time:  {training_time / 60:.1f} minutes")
-            print(f"Results saved in: {run_dir}")
+            # Default to F16 training for unknown environments
+            print(f"Warning: Unknown environment '{env_name}', defaulting to F16 training loop")
+            self.train_f16()
 
-        # Video summary for lunar lander
-        if is_lunar_lander and plotting_config.get("enabled", True):
-            video_files = list(videos_dir.glob("*.mp4"))
-            if video_files:
-                print(f"Videos saved: {len(video_files)} episodes recorded in {videos_dir}")
+
+def train_agent(env_config_path: str, agent_config_path: str, resume_from: str = None):
+    """
+    Main training function that creates trainer and initiates training.
+
+    Args:
+        env_config_path: Path to the environment configuration file
+        agent_config_path: Path to the agent configuration file
+        resume_from: Optional path to checkpoint to resume training from
+    """
+    trainer = Trainer(env_config_path, agent_config_path, resume_from)
+    trainer.train()
 
 
 def main():
@@ -445,7 +618,7 @@ def main():
     )
 
     parser.add_argument(
-        "--agent-config", 
+        "--agent-config",
         type=str,
         default="configs/agents/idhp.yaml",
         help="Path to the agent configuration file",
@@ -464,7 +637,7 @@ def main():
     if not Path(args.env_config).exists():
         print(f"Environment configuration file not found: {args.env_config}")
         sys.exit(1)
-    
+
     if not Path(args.agent_config).exists():
         print(f"Agent configuration file not found: {args.agent_config}")
         sys.exit(1)

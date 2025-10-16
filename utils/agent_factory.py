@@ -113,6 +113,8 @@ def create_adhdp_agent(agent_config: Dict[str, Any], env: gym.Env) -> ADHDPAgent
     Returns:
         Configured ADHDP agent
     """
+    import numpy as np
+
     # Default parameters for ADHDP
     defaults = {
         "hidden_sizes": [64, 64],
@@ -128,6 +130,10 @@ def create_adhdp_agent(agent_config: Dict[str, Any], env: gym.Env) -> ADHDPAgent
     obs_dim = env.observation_space.shape[0]
     act_dim = env.action_space.shape[0] if hasattr(env.action_space, 'shape') else 1
 
+    # Extract action space bounds
+    action_low = env.action_space.low if hasattr(env.action_space, 'low') else -np.ones(act_dim)
+    action_high = env.action_space.high if hasattr(env.action_space, 'high') else np.ones(act_dim)
+
     # Create agent
     agent = ADHDPAgent(
         obs_dim=obs_dim,
@@ -136,7 +142,9 @@ def create_adhdp_agent(agent_config: Dict[str, Any], env: gym.Env) -> ADHDPAgent
         actor_lr=params["actor_lr"],
         critic_lr=params["critic_lr"],
         gamma=params["gamma"],
-        device=params["device"]
+        device=params["device"],
+        action_low=action_low,
+        action_high=action_high
     )
 
     return agent

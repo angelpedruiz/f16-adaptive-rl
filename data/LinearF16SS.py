@@ -96,3 +96,35 @@ state_bounds = {
 
 B_f1 = B_long_hi.copy()
 B_f1[-1,-1] = B_f1[-1,-1] * 0.3
+
+# ==========================================================
+#   Short-Period Model (2-state approximation)
+# ==========================================================
+# States: x = [α, q]^T (angle of attack, pitch rate)
+# Input: u = [δ_e] (elevator deflection)
+#
+# Extracted from A_long_hi_ref (rows/cols 3,4) and B_long_hi (row 6, col 1)
+
+# State indices in full model: α=3, q=4
+# Input index in full model: δ_e is actuator state at index 6
+# But the actual control input δ_e is at column index 1 in B_long_hi
+
+# Extract short-period A matrix (2x2): rows 3,4 and columns 3,4
+A_sp = A_long_hi_ref[np.ix_([3, 4], [3, 4])]
+
+# Extract short-period B matrix (2x1): rows 3,4 and column corresponding to δ_e
+# The elevator actuator dynamics are in row 6, and δ_e input is column 1
+# But for short-period, we need the direct influence of δ_e on α and q
+# Looking at the structure: δ_e actuator is state 6, so we need column 6
+B_sp = A_long_hi_ref[np.ix_([3, 4], [6])]
+
+# Short-period state bounds
+state_bounds_sp = {
+    "alpha": (-0.61, 0.6),  # Angle of attack in radians
+    "q": (-1, 1),  # Pitch rate in rad/s
+}
+
+# Short-period control bounds
+control_bounds_sp = {
+    "delta_e": (-22 * np.pi / 180, 1 * np.pi / 180),  # Elevator deflection in radians
+}

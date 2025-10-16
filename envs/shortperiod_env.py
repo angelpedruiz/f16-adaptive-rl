@@ -9,7 +9,7 @@ State vector: x = [alpha, q]^T where
     - alpha: angle of attack [rad]
     - q: pitch rate [rad/s]
 
-Control input: u = delta_e (elevator deflection [rad])
+Control input: u = delta_e (elevator deflection [deg])
 
 Dynamics: x_dot = A*x + B*u + w(t)
           y = C*x
@@ -22,7 +22,6 @@ Observation: [alpha, q, alpha_ref]
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
-import matplotlib.pyplot as plt
 from typing import Optional, Tuple, Dict, Any
 
 
@@ -48,8 +47,6 @@ class ShortPeriodEnv(gym.Env):
         max_episode_steps (int): Maximum steps per episode
     """
 
-    metadata = {"render_modes": ["human"], "render_fps": 50}
-
     def __init__(
         self,
         A: Optional[np.ndarray] = None,
@@ -61,8 +58,7 @@ class ShortPeriodEnv(gym.Env):
         w_alpha: float = 100.0,
         w_q: float = 10.0,
         w_u: float = 1.0,
-        max_episode_steps: int = 1000,
-        render_mode: Optional[str] = None,
+        max_episode_steps: int = 1000
     ):
         """
         Initialize the short-period pitch dynamics environment.
@@ -79,13 +75,12 @@ class ShortPeriodEnv(gym.Env):
             w_q: Weight for pitch rate penalty in reward function
             w_u: Weight for control effort penalty in reward function
             max_episode_steps: Maximum number of steps per episode
-            render_mode: Rendering mode (only "human" is supported)
         """
         super().__init__()
 
         # System matrices
-        self.A = A if A is not None else np.array([[-0.5, 1.0], [-20.0, -2.0]])
-        self.B = B if B is not None else np.array([[0.0], [5.0]])
+        self.A = A if A is not None else np.array([[-0.6761,  0.9392], [-0.5757, -0.8741]])
+        self.B = B if B is not None else np.array([[-0.001437], [-0.1188]])
 
         # Simulation parameters
         self.dt = dt
@@ -102,14 +97,14 @@ class ShortPeriodEnv(gym.Env):
         self.max_episode_steps = max_episode_steps
 
         # State limits
-        self.alpha_max = 0.35  # rad (~20 degrees)
+        self.alpha_max = 1.0  # rad (~20 degrees)
         self.q_max = 50.0      # rad/s
-        self.delta_max = np.deg2rad(25.0)  # rad
+        self.delta_max = 25.0  # deg
 
         # Termination limits (slightly larger than observation limits)
-        self.alpha_term = 0.4   # rad
+        self.alpha_term = 2.0   # rad
         self.q_term = 200.0     # rad/s
-        self.term_penalty = -1000.0
+        self.term_penalty = -100
 
         # Define observation space: [alpha, q, alpha_ref]
         self.observation_space = spaces.Box(
@@ -130,16 +125,6 @@ class ShortPeriodEnv(gym.Env):
         self.time = 0.0
         self.step_count = 0
         self.rng = None
-
-        # Rendering
-        self.render_mode = render_mode
-        self.history = {
-            "time": [],
-            "alpha": [],
-            "alpha_ref": [],
-            "q": [],
-            "delta_e": [],
-        }
 
     def reset(
         self,
@@ -170,15 +155,6 @@ class ShortPeriodEnv(gym.Env):
         self.time = 0.0
         self.step_count = 0
 
-        # Reset history
-        self.history = {
-            "time": [],
-            "alpha": [],
-            "alpha_ref": [],
-            "q": [],
-            "delta_e": [],
-        }
-
         # Compute initial observation
         alpha_ref = self._get_reference(self.time)
         observation = np.array([self.state[0], self.state[1], alpha_ref], dtype=np.float32)
@@ -194,7 +170,7 @@ class ShortPeriodEnv(gym.Env):
         Execute one time step in the environment.
 
         Args:
-            action: Control input [delta_e] in radians
+            action: Control input [delta_e] in degrees
 
         Returns:
             observation: New observation [alpha, q, alpha_ref]
@@ -217,17 +193,10 @@ class ShortPeriodEnv(gym.Env):
         self.time += self.dt
         self.step_count += 1
 
-        # Store history for rendering
-        self.history["time"].append(self.time)
-        self.history["alpha"].append(self.state[0])
-        self.history["alpha_ref"].append(alpha_ref)
-        self.history["q"].append(self.state[1])
-        self.history["delta_e"].append(delta_e)
-
         # Compute reward
         alpha = self.state[0]
         q = self.state[1]
-        tracking_error = alpha - alpha_ref
+        tracking_error = alpha_ref - alpha
 
         reward = -(
             self.w_alpha * tracking_error**2
@@ -260,56 +229,6 @@ class ShortPeriodEnv(gym.Env):
 
         return observation, float(reward), terminated, truncated, info
 
-    def render(self):
-        """
-        Render the environment state using matplotlib.
-
-        Displays time history plots of:
-        - Angle of attack (alpha) and reference (alpha_ref)
-        - Pitch rate (q)
-        - Elevator deflection (delta_e)
-        """
-        if len(self.history["time"]) == 0:
-            print("No data to render. Run at least one step first.")
-            return
-
-        time = np.array(self.history["time"])
-        alpha = np.rad2deg(np.array(self.history["alpha"]))
-        alpha_ref = np.rad2deg(np.array(self.history["alpha_ref"]))
-        q = np.rad2deg(np.array(self.history["q"]))
-        delta_e = np.rad2deg(np.array(self.history["delta_e"]))
-
-        fig, axes = plt.subplots(3, 1, figsize=(10, 8))
-
-        # Plot angle of attack
-        axes[0].plot(time, alpha, label=r"$\alpha$ (actual)", linewidth=2)
-        axes[0].plot(time, alpha_ref, label=r"$\alpha_{ref}$ (reference)",
-                     linestyle="--", linewidth=2)
-        axes[0].set_ylabel("Angle of Attack [deg]")
-        axes[0].legend()
-        axes[0].grid(True, alpha=0.3)
-        axes[0].set_title("Short-Period Pitch Dynamics - Reference Tracking")
-
-        # Plot pitch rate
-        axes[1].plot(time, q, label="q (pitch rate)", linewidth=2, color="orange")
-        axes[1].set_ylabel("Pitch Rate [deg/s]")
-        axes[1].legend()
-        axes[1].grid(True, alpha=0.3)
-
-        # Plot elevator deflection
-        axes[2].plot(time, delta_e, label=r"$\delta_e$ (elevator)", linewidth=2, color="green")
-        axes[2].set_xlabel("Time [s]")
-        axes[2].set_ylabel("Elevator Deflection [deg]")
-        axes[2].legend()
-        axes[2].grid(True, alpha=0.3)
-
-        plt.tight_layout()
-        plt.show()
-
-    def close(self):
-        """Clean up resources."""
-        plt.close("all")
-
     def _get_reference(self, t: float) -> float:
         """
         Compute the reference angle of attack at time t.
@@ -328,7 +247,7 @@ class ShortPeriodEnv(gym.Env):
 
         Args:
             x: State vector [alpha, q]
-            u: Control input delta_e [rad]
+            u: Control input delta_e [deg]
 
         Returns:
             x_dot: State derivative [alpha_dot, q_dot]
@@ -348,8 +267,8 @@ class ShortPeriodEnv(gym.Env):
         Perform one RK4 integration step.
 
         Args:
-            x: Current state [�, q]
-            u: Control input delta_e [rad]
+            x: Current state [alpha, q]
+            u: Control input delta_e [deg]
             dt: Time step [s]
 
         Returns:

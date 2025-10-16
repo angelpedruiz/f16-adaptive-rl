@@ -8,11 +8,11 @@ name: "shortperiod"                # Environment name
 dynamics:
   # A matrix (2x2): System dynamics
   # Default: [[-0.5, 1.0], [-20.0, -2.0]]
-  A: [[-0.5, 1.0], [-20.0, -2.0]]
+  A: [[-0.6761,  0.9392], [-0.5757, -0.8741]]
 
   # B matrix (2x1): Control input
   # Default: [[0.0], [5.0]]
-  B: [[0.0], [5.0]]
+  B: [[-0.001437], [-0.1188]]
 
 # Simulation parameters
 dt: 0.01                          # Integration time step [s]
@@ -29,7 +29,7 @@ noise:
 
 # Reward function weights
 reward:
-  w_alpha: 100.0                  # Weight for tracking error penalty
+  w_alpha: 10.0                  # Weight for tracking error penalty
   w_q: 0.0                       # Weight for pitch rate penalty
   w_u: 0.0                        # Weight for control effort penalty
 
@@ -54,8 +54,8 @@ training:
 # Checkpointing configuration
 checkpointing:
   interval: 1000                  # Save checkpoint every N episodes
-  keep_last_n: 5                  # Keep last N checkpoints
-  save_best: true                 # Save best checkpoint based on performance
+  keep_last_n: 0                  # Keep last N checkpoints
+  save_best: false                 # Save best checkpoint based on performance
   resume_from: null               # Path to checkpoint to resume from
 
 # Plotting configuration
@@ -66,7 +66,7 @@ plotting:
   training_metrics:
     interval: 100                 # Plot training metrics every N episodes
     rolling_window: 100           # Window size for rolling average
-    save_individual: true         # Save individual metric plots
+    save_individual: false         # Save individual metric plots
 
   # Trajectory plots
   trajectories:

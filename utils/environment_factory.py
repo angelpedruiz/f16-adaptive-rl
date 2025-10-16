@@ -127,8 +127,7 @@ def create_shortperiod_environment(env_config: Dict[str, Any]) -> ShortPeriodEnv
         w_alpha=w_alpha,
         w_q=w_q,
         w_u=w_u,
-        max_episode_steps=max_steps,
-        render_mode=env_config.get("render_mode", None)
+        max_episode_steps=max_steps
     )
 
     return env
