@@ -284,3 +284,171 @@ class ShortPeriodEnv(gym.Env):
         return x_next
 
 
+if __name__ == "__main__":
+    """Minimal training loop for testing ADHDP with ShortPeriodEnv."""
+    import sys
+    from pathlib import Path
+    import matplotlib.pyplot as plt
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
+
+    from agents.adhdp import ADHDPAgent
+
+    # Create environment
+    env = ShortPeriodEnv(
+        dt=0.01,
+        A_ref=0.1,
+        T_ref=5.0,
+        w_alpha=10.0,
+        w_q=0.0,
+        w_u=0.0,
+        max_episode_steps=500  # Reduced for faster testing
+    )
+
+    # Create agent
+    agent = ADHDPAgent(
+        obs_dim=3,
+        act_dim=1,
+        hidden_sizes=[64, 64],
+        actor_lr=0.001,
+        critic_lr=0.001,
+        gamma=0.99,
+        device='cpu',
+        action_low=env.action_space.low,
+        action_high=env.action_space.high
+    )
+
+    # Training loop with trajectory recording
+    num_episodes = 10
+    max_steps = 500  # Match env max_steps
+    print(f"Training ADHDP on ShortPeriodEnv for {num_episodes} episodes")
+    print("=" * 60)
+
+    # Storage for trajectories (padded to max_steps with NaN)
+    all_alphas = np.full((num_episodes, max_steps), np.nan)
+    all_qs = np.full((num_episodes, max_steps), np.nan)
+    all_alpha_refs = np.full((num_episodes, max_steps), np.nan)
+    all_delta_es = np.full((num_episodes, max_steps), np.nan)
+    all_rewards = np.full((num_episodes, max_steps), np.nan)
+    episode_lengths = []
+
+    for episode in range(num_episodes):
+        # Reset agent for online learning (no memory between episodes)
+        agent = ADHDPAgent(
+            obs_dim=3,
+            act_dim=1,
+            hidden_sizes=[64, 64],
+            actor_lr=0.001,
+            critic_lr=0.001,
+            gamma=0.99,
+            device='cpu',
+            action_low=env.action_space.low,
+            action_high=env.action_space.high
+        )
+
+        obs, _ = env.reset(seed=episode)
+        total_reward = 0
+        steps = 0
+        terminated = False
+        truncated = False
+
+        while not (terminated or truncated):
+            # Get action
+            action = agent.get_action(obs)
+
+            # Step environment
+            next_obs, reward, terminated, truncated, info = env.step(action)
+
+            # Record trajectory
+            all_alphas[episode, steps] = info['alpha']
+            all_qs[episode, steps] = info['q']
+            all_alpha_refs[episode, steps] = info['alpha_ref']
+            all_delta_es[episode, steps] = info['delta_e']
+            all_rewards[episode, steps] = reward
+
+            # Update agent
+            agent.update(obs, action, reward, terminated, next_obs)
+
+            total_reward += reward
+            steps += 1
+            obs = next_obs
+
+        episode_lengths.append(steps)
+
+        # Print episode summary
+        status = "TERMINATED" if terminated else "TRUNCATED"
+        print(f"Episode {episode+1:3d}: {status:10s} | Steps: {steps:4d} | "
+              f"Reward: {total_reward:8.2f} | "
+              f"Final alpha: {np.rad2deg(info['alpha']):6.2f}° | "
+              f"Final q: {info['q']:6.3f} rad/s")
+
+    print("=" * 60)
+    print("Training complete!")
+
+    # Plot mean trajectory with variance
+    print("\nGenerating trajectory plot...")
+
+    # Compute statistics (ignoring NaN values)
+    mean_alpha = np.nanmean(all_alphas, axis=0)
+    std_alpha = np.nanstd(all_alphas, axis=0)
+    mean_q = np.nanmean(all_qs, axis=0)
+    std_q = np.nanstd(all_qs, axis=0)
+    mean_alpha_ref = np.nanmean(all_alpha_refs, axis=0)
+    mean_delta_e = np.nanmean(all_delta_es, axis=0)
+    std_delta_e = np.nanstd(all_delta_es, axis=0)
+    mean_reward = np.nanmean(all_rewards, axis=0)
+
+    # Time vector
+    time = np.arange(max_steps) * env.dt
+
+    # Create figure
+    fig, axes = plt.subplots(4, 1, figsize=(12, 10))
+    fig.suptitle(f'ADHDP Training on Short Period Environment ({num_episodes} episodes)', fontsize=14, fontweight='bold')
+
+    # Plot 1: Alpha tracking
+    ax = axes[0]
+    ax.plot(time, np.rad2deg(mean_alpha_ref), 'k--', label='Reference α', linewidth=2, alpha=0.7)
+    ax.plot(time, np.rad2deg(mean_alpha), 'b-', label='Mean α', linewidth=2)
+    ax.fill_between(time,
+                     np.rad2deg(mean_alpha - std_alpha),
+                     np.rad2deg(mean_alpha + std_alpha),
+                     alpha=0.3, color='b', label='±1 std')
+    ax.axhline(np.rad2deg(env.alpha_term), color='r', linestyle=':', label='Termination limit', linewidth=1.5)
+    ax.axhline(-np.rad2deg(env.alpha_term), color='r', linestyle=':', linewidth=1.5)
+    ax.set_ylabel('Angle of Attack [deg]')
+    ax.legend(loc='upper right')
+    ax.grid(True, alpha=0.3)
+
+    # Plot 2: Pitch rate
+    ax = axes[1]
+    ax.plot(time, mean_q, 'g-', label='Mean q', linewidth=2)
+    ax.fill_between(time, mean_q - std_q, mean_q + std_q, alpha=0.3, color='g', label='±1 std')
+    ax.axhline(env.q_term, color='r', linestyle=':', label='Termination limit', linewidth=1.5)
+    ax.axhline(-env.q_term, color='r', linestyle=':', linewidth=1.5)
+    ax.set_ylabel('Pitch Rate [rad/s]')
+    ax.legend(loc='upper right')
+    ax.grid(True, alpha=0.3)
+
+    # Plot 3: Control input
+    ax = axes[2]
+    ax.plot(time, mean_delta_e, 'm-', label='Mean δₑ', linewidth=2)
+    ax.fill_between(time, mean_delta_e - std_delta_e, mean_delta_e + std_delta_e,
+                     alpha=0.3, color='m', label='±1 std')
+    ax.axhline(25.0, color='r', linestyle=':', label='Action limits', linewidth=1.5)
+    ax.axhline(-25.0, color='r', linestyle=':', linewidth=1.5)
+    ax.set_ylabel('Elevator Deflection [deg]')
+    ax.legend(loc='upper right')
+    ax.grid(True, alpha=0.3)
+
+    # Plot 4: Reward
+    ax = axes[3]
+    ax.plot(time, mean_reward, 'orange', label='Mean reward', linewidth=2)
+    ax.set_ylabel('Reward')
+    ax.set_xlabel('Time [s]')
+    ax.legend(loc='upper right')
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+    print(f"\nMean episode length: {np.mean(episode_lengths):.1f} ± {np.std(episode_lengths):.1f} steps")
+    print("Close the plot window to exit.")
