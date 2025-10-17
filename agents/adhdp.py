@@ -121,7 +121,8 @@ class ADHDPAgent():
 
         # Compute TD error
         V_pred = self.critic(obs, action)
-        critic_loss = 0.5 * ((V_pred - td_target) ** 2).mean()
+        td_error = td_target - V_pred
+        critic_loss = 0.5 * ((td_error) ** 2).mean()
 
         self.critic_optimizer.zero_grad()
         critic_loss.backward()

@@ -55,9 +55,9 @@ class ShortPeriodEnv(gym.Env):
         A_ref: float = 0.1,
         T_ref: float = 10.0,
         process_noise_std: float = 0.0,
-        w_alpha: float = 100.0,
-        w_q: float = 10.0,
-        w_u: float = 1.0,
+        w_alpha: float = 1.0,
+        w_q: float = 0.0,
+        w_u: float = 0.0,
         max_episode_steps: int = 1000
     ):
         """
@@ -96,15 +96,15 @@ class ShortPeriodEnv(gym.Env):
         # Episode parameters
         self.max_episode_steps = max_episode_steps
 
-        # State limits
-        self.alpha_max = 1.0  # rad (~20 degrees)
-        self.q_max = 50.0      # rad/s
+        # State limits (realistic values for aircraft dynamics)
+        self.alpha_max = 0.4*2  # rad (~20 degrees)
+        self.q_max = 1.5       # rad/s (~86 deg/s)
         self.delta_max = 25.0  # deg
 
         # Termination limits (slightly larger than observation limits)
-        self.alpha_term = 2.0   # rad
-        self.q_term = 200.0     # rad/s
-        self.term_penalty = -100
+        self.alpha_term = 0.52*2   # rad (~30 degrees)
+        self.q_term = 2.0        # rad/s (~115 deg/s)
+        self.term_penalty = -0.0
 
         # Define observation space: [alpha, q, alpha_ref]
         self.observation_space = spaces.Box(
@@ -296,30 +296,30 @@ if __name__ == "__main__":
     # Create environment
     env = ShortPeriodEnv(
         dt=0.01,
-        A_ref=0.1,
+        A_ref=0.35,
         T_ref=5.0,
-        w_alpha=10.0,
+        w_alpha=1.0,
         w_q=0.0,
         w_u=0.0,
-        max_episode_steps=500  # Reduced for faster testing
+        max_episode_steps=1000  # Reduced for faster testing
     )
 
     # Create agent
     agent = ADHDPAgent(
         obs_dim=3,
         act_dim=1,
-        hidden_sizes=[64, 64],
-        actor_lr=0.001,
-        critic_lr=0.001,
-        gamma=0.99,
-        device='cpu',
+        hidden_sizes=[32, 32],
+        actor_lr=0.01,
+        critic_lr=0.01,
+        gamma=0.8,
+        device='cuda',
         action_low=env.action_space.low,
         action_high=env.action_space.high
     )
 
     # Training loop with trajectory recording
-    num_episodes = 10
-    max_steps = 500  # Match env max_steps
+    num_episodes = 1
+    max_steps = 1000  # Match env max_steps
     print(f"Training ADHDP on ShortPeriodEnv for {num_episodes} episodes")
     print("=" * 60)
 
@@ -333,14 +333,15 @@ if __name__ == "__main__":
 
     for episode in range(num_episodes):
         # Reset agent for online learning (no memory between episodes)
+            # Create agent
         agent = ADHDPAgent(
             obs_dim=3,
             act_dim=1,
-            hidden_sizes=[64, 64],
-            actor_lr=0.001,
-            critic_lr=0.001,
-            gamma=0.99,
-            device='cpu',
+            hidden_sizes=[32, 32],
+            actor_lr=0.01,
+            critic_lr=0.01,
+            gamma=0.8,
+            device='cuda',
             action_low=env.action_space.low,
             action_high=env.action_space.high
         )
@@ -376,10 +377,9 @@ if __name__ == "__main__":
 
         # Print episode summary
         status = "TERMINATED" if terminated else "TRUNCATED"
-        print(f"Episode {episode+1:3d}: {status:10s} | Steps: {steps:4d} | "
-              f"Reward: {total_reward:8.2f} | "
-              f"Final alpha: {np.rad2deg(info['alpha']):6.2f}° | "
-              f"Final q: {info['q']:6.3f} rad/s")
+        print(f"\nEpisode {episode+1:3d}: {status:10s} | Steps: {steps:4d} | Total Reward: {total_reward:8.2f}")
+        print(f"  Final alpha: {info['alpha']:6.3f} rad | Final q: {info['q']:6.3f} rad/s")
+        print("-" * 60)
 
     print("=" * 60)
     print("Training complete!")
@@ -396,56 +396,109 @@ if __name__ == "__main__":
     mean_delta_e = np.nanmean(all_delta_es, axis=0)
     std_delta_e = np.nanstd(all_delta_es, axis=0)
     mean_reward = np.nanmean(all_rewards, axis=0)
+    std_reward = np.nanstd(all_rewards, axis=0)
+
+    # Compute tracking error statistics
+    mean_tracking_error = mean_alpha_ref - mean_alpha
+    std_tracking_error = std_alpha  # Error std is same as alpha std
 
     # Time vector
     time = np.arange(max_steps) * env.dt
 
-    # Create figure
-    fig, axes = plt.subplots(4, 1, figsize=(12, 10))
-    fig.suptitle(f'ADHDP Training on Short Period Environment ({num_episodes} episodes)', fontsize=14, fontweight='bold')
+    # Create figure with dark theme (similar to plotting manager)
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8), dpi=150)
+    fig.patch.set_facecolor("black")
+    axes = axes.flatten()
 
-    # Plot 1: Alpha tracking
+    # Helper function to apply dark theme
+    def apply_dark_theme(ax):
+        ax.set_facecolor("black")
+        ax.tick_params(colors="white")
+        ax.xaxis.label.set_color("white")
+        ax.yaxis.label.set_color("white")
+        ax.grid(True, alpha=0.3, color="white")
+        for spine in ax.spines.values():
+            spine.set_color("white")
+
+    # Plot 1: Alpha tracking with reference
     ax = axes[0]
-    ax.plot(time, np.rad2deg(mean_alpha_ref), 'k--', label='Reference α', linewidth=2, alpha=0.7)
-    ax.plot(time, np.rad2deg(mean_alpha), 'b-', label='Mean α', linewidth=2)
+    ax.plot(time, mean_alpha, color='cyan', linewidth=2, label='Mean α')
     ax.fill_between(time,
-                     np.rad2deg(mean_alpha - std_alpha),
-                     np.rad2deg(mean_alpha + std_alpha),
-                     alpha=0.3, color='b', label='±1 std')
-    ax.axhline(np.rad2deg(env.alpha_term), color='r', linestyle=':', label='Termination limit', linewidth=1.5)
-    ax.axhline(-np.rad2deg(env.alpha_term), color='r', linestyle=':', linewidth=1.5)
-    ax.set_ylabel('Angle of Attack [deg]')
-    ax.legend(loc='upper right')
-    ax.grid(True, alpha=0.3)
+                     mean_alpha - std_alpha,
+                     mean_alpha + std_alpha,
+                     alpha=0.3, color='cyan', label='±1 std')
+    ax.plot(time, mean_alpha_ref, color='magenta', linestyle='--', linewidth=2, label='Reference α')
+    ax.axhline(env.alpha_term, color='red', linestyle=':', linewidth=1.5, alpha=0.7)
+    ax.axhline(-env.alpha_term, color='red', linestyle=':', linewidth=1.5, alpha=0.7)
+    ax.set_xlabel('Time [s]')
+    ax.set_ylabel('Alpha [rad]')
+    ax.legend(loc='best', facecolor='black', edgecolor='white', labelcolor='white')
+    apply_dark_theme(ax)
 
     # Plot 2: Pitch rate
     ax = axes[1]
-    ax.plot(time, mean_q, 'g-', label='Mean q', linewidth=2)
-    ax.fill_between(time, mean_q - std_q, mean_q + std_q, alpha=0.3, color='g', label='±1 std')
-    ax.axhline(env.q_term, color='r', linestyle=':', label='Termination limit', linewidth=1.5)
-    ax.axhline(-env.q_term, color='r', linestyle=':', linewidth=1.5)
-    ax.set_ylabel('Pitch Rate [rad/s]')
-    ax.legend(loc='upper right')
-    ax.grid(True, alpha=0.3)
-
-    # Plot 3: Control input
-    ax = axes[2]
-    ax.plot(time, mean_delta_e, 'm-', label='Mean δₑ', linewidth=2)
-    ax.fill_between(time, mean_delta_e - std_delta_e, mean_delta_e + std_delta_e,
-                     alpha=0.3, color='m', label='±1 std')
-    ax.axhline(25.0, color='r', linestyle=':', label='Action limits', linewidth=1.5)
-    ax.axhline(-25.0, color='r', linestyle=':', linewidth=1.5)
-    ax.set_ylabel('Elevator Deflection [deg]')
-    ax.legend(loc='upper right')
-    ax.grid(True, alpha=0.3)
-
-    # Plot 4: Reward
-    ax = axes[3]
-    ax.plot(time, mean_reward, 'orange', label='Mean reward', linewidth=2)
-    ax.set_ylabel('Reward')
+    ax.plot(time, mean_q, color='cyan', linewidth=2, label='Mean q')
+    ax.fill_between(time, mean_q - std_q, mean_q + std_q, alpha=0.3, color='cyan', label='±1 std')
+    ax.axhline(env.q_term, color='red', linestyle=':', linewidth=1.5, alpha=0.7)
+    ax.axhline(-env.q_term, color='red', linestyle=':', linewidth=1.5, alpha=0.7)
     ax.set_xlabel('Time [s]')
-    ax.legend(loc='upper right')
-    ax.grid(True, alpha=0.3)
+    ax.set_ylabel('q [rad/s]')
+    ax.legend(loc='best', facecolor='black', edgecolor='white', labelcolor='white')
+    apply_dark_theme(ax)
+
+    # Plot 3: Elevator deflection (action)
+    ax = axes[2]
+    ax.plot(time, mean_delta_e, color='yellow', linewidth=2, label='Mean δₑ')
+    ax.fill_between(time, mean_delta_e - std_delta_e, mean_delta_e + std_delta_e,
+                     alpha=0.3, color='yellow', label='±1 std')
+    ax.axhline(env.delta_max, color='red', linestyle=':', linewidth=1.5, alpha=0.7)
+    ax.axhline(-env.delta_max, color='red', linestyle=':', linewidth=1.5, alpha=0.7)
+    ax.set_xlabel('Time [s]')
+    ax.set_ylabel('Delta_e [deg]')
+    ax.legend(loc='best', facecolor='black', edgecolor='white', labelcolor='white')
+    apply_dark_theme(ax)
+
+    # Plot 4: Tracking error
+    ax = axes[3]
+    ax.plot(time, mean_tracking_error, color='red', linestyle='--', linewidth=2, label='Mean Error')
+    ax.fill_between(time,
+                     mean_tracking_error - std_tracking_error,
+                     mean_tracking_error + std_tracking_error,
+                     alpha=0.3, color='red', label='±1 std')
+    ax.axhline(0, color='white', linestyle=':', alpha=0.5)
+    ax.set_xlabel('Time [s]')
+    ax.set_ylabel('Alpha Error [rad]')
+    ax.legend(loc='best', facecolor='black', edgecolor='white', labelcolor='white')
+    apply_dark_theme(ax)
+
+    # Plot 5: Reward
+    ax = axes[4]
+    ax.plot(time, mean_reward, color='green', linewidth=2, label='Mean Reward')
+    ax.fill_between(time, mean_reward - std_reward, mean_reward + std_reward,
+                     alpha=0.3, color='green', label='±1 std')
+    ax.set_xlabel('Time [s]')
+    ax.set_ylabel('Reward')
+    ax.legend(loc='best', facecolor='black', edgecolor='white', labelcolor='white')
+    apply_dark_theme(ax)
+
+    # Plot 6: Cumulative reward
+    ax = axes[5]
+    cumulative_reward = np.nancumsum(mean_reward)
+    ax.plot(time, cumulative_reward, color='lime', linewidth=2, label='Cumulative Reward')
+    ax.set_xlabel('Time [s]')
+    ax.set_ylabel('Cumulative Reward')
+    ax.legend(loc='best', facecolor='black', edgecolor='white', labelcolor='white')
+    apply_dark_theme(ax)
+
+    # Figure title
+    total_reward = np.nansum(mean_reward)
+    fig.suptitle(
+        f'ADHDP on Short-Period Environment | {num_episodes} Episodes | Mean Total Reward: {total_reward:.2f}',
+        fontsize=14,
+        color='white',
+        fontweight='bold',
+        y=0.98
+    )
 
     plt.tight_layout()
     plt.show()
