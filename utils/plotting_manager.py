@@ -4,6 +4,7 @@ Contains the plotting manager class. Plots are classified into Env and Agent plo
 import gymnasium as gym
 import numpy as np
 import matplotlib.pyplot as plt
+import json
 
 class PlottingManager:
     def __init__(self, env: gym.Env, agent, save_dir: str = None):
@@ -29,7 +30,18 @@ class PlottingManager:
         """Helper to construct save path for a plot."""
         import os
         return os.path.join(self.save_dir, filename) if self.save_dir else None
-        
+    
+    def save_run_params(self, seed: int, filename: str = 'run_params.json'):
+        ''' Save environment and agent parameters to a .json file. '''
+        params = {
+            'env_params': self.env.get_params() if hasattr(self.env, 'get_params') else {},
+            'agent_params': self.agent.get_params() if hasattr(self.agent, 'get_params') else {},
+            'seed': seed
+        }
+
+        with open(self._get_save_path(filename), 'w') as f:
+            json.dump(params, f, indent=4)
+            
     def plot_pendulumcart_trajectory(self, states: np.ndarray, actions: np.ndarray,
                                       rewards: list[float] = None, filename: str = 'trajectory.png'):
         """

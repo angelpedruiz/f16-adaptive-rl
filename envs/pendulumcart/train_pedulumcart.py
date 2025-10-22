@@ -5,6 +5,7 @@ import sys
 import os
 import numpy as np
 import torch
+import tqdm
 
 # Add parent directories to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
@@ -68,7 +69,7 @@ class PendulumCartTrainer():
         agent.prev_obs = torch.FloatTensor(obs).unsqueeze(0)
         agent.prev_reward = torch.FloatTensor([0.0]).unsqueeze(0)
 
-        for _ in range(max_steps):
+        for _ in tqdm.tqdm(range(max_steps), desc="Training HDP Agent", unit="step"):
             # Get action from agent
             action = agent.get_action(obs)
 
@@ -79,7 +80,7 @@ class PendulumCartTrainer():
             # Update agent and get metrics
             metrics = agent.update(obs, action, reward, terminated, next_obs)
             
-            # Store data
+            # Store data every max_steps // 10
             training_data['states'].append(env.state.copy())
             training_data['actions'].append(action)
             training_data['rewards'].append(reward)
@@ -97,7 +98,8 @@ class PendulumCartTrainer():
 
             # Handle episode end
             if done:
-                break
+                #obs, _ = self.env.reset()
+                break # only one episode
             else:
                 obs = next_obs
 
@@ -105,15 +107,21 @@ class PendulumCartTrainer():
     
 if __name__ == "__main__":
     from datetime import datetime
+    
+    # seed
+    seed = 42
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
     # ------- Parameters -------
-    max_steps = 100
+    max_steps_per_episode = 300
+    training_max_steps = 300
     dt = 0.01
 
     gamma = 0.99
-    lr_actor = 1e-5
-    lr_critic = 1e-7
-    lr_model = 1e-10
+    lr_actor = 5e-2
+    lr_critic = 1e-1
+    lr_model = 1e-3
     actor_sizes = [32, 32]
     critic_sizes = [32, 32]
     model_sizes = [32, 32]
@@ -125,7 +133,7 @@ if __name__ == "__main__":
     print(f"Results will be saved to: {save_dir}\n")
 
     # ------- Initialize -------
-    env = PendulumCartEnv(dt=dt, max_steps=max_steps)
+    env = PendulumCartEnv(dt=dt, max_steps=max_steps_per_episode)
     trainer = PendulumCartTrainer(env)
     agent = HDPAgent(
         obs_space=env.observation_space,
@@ -137,8 +145,9 @@ if __name__ == "__main__":
 
     # ------- Train Agent -------
     print("Starting training...")
-    training_data = trainer.train_hdp(agent, max_steps=max_steps)
+    training_data = trainer.train_hdp(agent, max_steps=training_max_steps)
     print("Training complete!")
+    print("Plotting results...")
 
     # ------- Convert data to numpy arrays for plotting -------
     training_data['states'] = np.array(training_data['states'])
@@ -164,6 +173,9 @@ if __name__ == "__main__":
 
     # Plot learning metrics
     plotting_manager.plot_hdp_learning(training_data)
+    
+    # Save env and agent parameters
+    plotting_manager.save_run_params(seed=seed) # last snapshot
 
     print("\nAll plots and animations generated successfully!")
     print(f"Results saved to: {save_dir}")

@@ -82,7 +82,9 @@ class Model(nn.Module):
     
 class HDPAgent():
     def __init__(self, obs_space: gym.Space, act_space: gym.Space, gamma: float, hidden_sizes: dict[str, list[int]], learning_rates: dict[str, float]):
-        
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         # Spaces
         self.obs_dim = obs_space.shape[0]
         self.act_dim = act_space.shape[0]
@@ -194,3 +196,18 @@ class HDPAgent():
                     'model': np.linalg.norm(np.concatenate([p.grad.data.cpu().numpy().flatten() for p in self.model.parameters() if p.grad is not None]))
                 }  
             }
+
+    def get_params(self) -> dict:
+        """Return agent parameters."""
+        params = {
+            'gamma': self.gamma,
+            'actor_hidden_sizes': [layer.out_features for layer in self.actor.model if isinstance(layer, nn.Linear)][:-1],
+            'critic_hidden_sizes': [layer.out_features for layer in self.critic.model if isinstance(layer, nn.Linear)][:-1],
+            'model_hidden_sizes': [layer.out_features for layer in self.model.model if isinstance(layer, nn.Linear)][:-1],
+            'learning_rates': {
+                'actor': self.actor_optimizer.param_groups[0]['lr'],
+                'critic': self.critic_optimizer.param_groups[0]['lr'],
+                'model': self.model_optimizer.param_groups[0]['lr']
+            }
+        }
+        return params

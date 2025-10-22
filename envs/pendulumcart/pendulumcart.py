@@ -52,7 +52,7 @@ class PendulumCartEnv(gym.Env):
         # Physical parameters
         self.M = 1.0          # cart mass [kg]
         self.m = 0.1          # pendulum mass [kg]
-        self.l = 0.5          # pendulum length [m]
+        self.l = 0.5*2          # pendulum length [m]
         self.g = 10         # gravity [m/s²]
 
         # Control and simulation parameters
@@ -148,6 +148,21 @@ class PendulumCartEnv(gym.Env):
         info = {'state': self.state.copy(), 'action': force, 'reward': reward}
 
         return self.state.copy(), float(reward), terminated, truncated, info
+    
+    def get_params(self) -> dict:
+        """Return environment parameters."""
+        params = {
+            'M': self.M,
+            'm': self.m,
+            'l': self.l,
+            'g': self.g,
+            'dt': self.dt,
+            'max_steps': self.max_steps,
+            'max_force': self.max_force,
+            'x_max': self.x_max,
+            'theta_max': self.theta_max
+        }
+        return params
 
     def render(self):
         """Render the current state of the pendulum cart."""
