@@ -4,6 +4,10 @@ from typing import Optional
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle, Circle
 from scipy.signal import place_poles
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from agents.hdp import HDPAgent
 
 class PendulumCartEnv(gym.Env):
     """
@@ -57,7 +61,7 @@ class PendulumCartEnv(gym.Env):
 
         # Control and simulation parameters
         self.dt = 0.02        # timestep [s]
-        self.max_force = 100.0 # maximum force [N]
+        self.max_force = 10.0 # maximum force [N]
 
         # Limits
         self.x_max = 10      # max cart position [m]
@@ -93,6 +97,9 @@ class PendulumCartEnv(gym.Env):
             shape=(1,),
             dtype=np.float32
         )
+        
+        self.state_dim = 4
+        self.act_dim = 1
 
         # State
         self.state = None
@@ -107,7 +114,7 @@ class PendulumCartEnv(gym.Env):
         x = 0.0
         x_dot = 0.0
         #theta = self.np_random.uniform(-0.1, 0.1)  # near upright
-        theta = 0.5
+        theta = 0.1
         theta_dot = 0.0
 
         self.state = np.array([x, x_dot, theta, theta_dot], dtype=np.float32)
@@ -133,7 +140,7 @@ class PendulumCartEnv(gym.Env):
         x, x_dot_val, theta, theta_dot = self.state
 
         # Reward (minimize deviation from upright and center)
-        reward = -(theta**2 + 0.1 * theta_dot**2 + 0.01 * x**2 + 0.001 * x_dot_val**2)
+        reward = -(theta**2)
 
         terminated = bool(abs(theta) > self.theta_max or abs(x) > self.x_max)
         truncated = False
@@ -205,69 +212,191 @@ def linear_feedback_control(A: np.ndarray, B: np.ndarray, eigs: np.ndarray, stat
     force = -K @ state
     return force[0]
 
+def run_episode(env: gym.Env, agent, max_steps: int = 200) -> float:
+    """Run a single episode using the given agent in the environment."""
+    obs, info = env.reset()
+    total_reward = 0.0
+
+    for step in range(max_steps):
+        action = agent.get_action(obs)
+        next_obs, reward, terminated, truncated, info = env.step(action)
+        agent.update(obs, action, reward, terminated, next_obs)
+
+        obs = next_obs
+        total_reward += reward
+
+        if terminated or truncated:
+            break
+
+    return total_reward
+
 # Simple episode with rendering
 if __name__ == "__main__":
     print("=" * 60)
-    print("Running Episode with Rendering")
+    print("Running Episode with Detailed Logging (HDP)")
     print("=" * 60)
 
     # Create environment
     env = PendulumCartEnv()
 
+    # Initialize ADHDP agent
+    import torch
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"Using device: {device}")
+
+    # Set deterministic seeds
+    np.random.seed(42)
+    torch.manual_seed(42)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(42)
+
+    agent = HDPAgent(
+        obs_dim=env.state_dim,
+        act_dim=env.act_dim,
+        hidden_sizes=[32, 32],
+        actor_lr=1e-2,      # Learning rate for actor (was 1e-4, too slow)
+        critic_lr=5e-3,     # Higher learning rate for critic
+        model_lr=1e-2,      # Highest for model (supervised learning)
+        gamma=0.95,         # Standard discount factor
+        device=device,
+        action_low=np.array([-env.max_force]),
+        action_high=np.array([env.max_force])
+    )
+
     # Reset environment
     obs, info = env.reset(seed=42)
     print("\nInitial State:")
-    print(f"  x     = {obs[0]:.4f} m")
-    print(f"  theta = {obs[2]:.4f} rad ({np.degrees(obs[2]):.2f}°)")
+    print(f"  x         = {obs[0]:.6f} m")
+    print(f"  x_dot     = {obs[1]:.6f} m/s")
+    print(f"  theta     = {obs[2]:.6f} rad ({np.degrees(obs[2]):.3f}°)")
+    print(f"  theta_dot = {obs[3]:.6f} rad/s")
 
     # Render initial state
     env.render()
 
-    # Run episode
-    max_steps = 100
+    # Run episode with detailed logging for 10 steps
+    max_steps = 200
     total_reward = 0
 
-    print(f"\nRunning episode for max {max_steps} steps...")
-    print("Close the plot window to end early.\n")
+    print(f"\n{'='*80}")
+    print(f"RUNNING {max_steps} STEPS WITH DETAILED LOGGING")
+    print(f"{'='*80}\n")
 
     for step in range(max_steps):
-        # get action
-        force = linear_feedback_control(env.A, env.B, eigs=[-2, -2.5, -3, -3.5], state=obs)
-        
-        # clip action
-        max_force = env.max_force
-        force = np.clip(force, -max_force, max_force)
-        action = np.array([force])
+        print(f"\n{'='*80}")
+        print(f"STEP {step + 1}/{max_steps}")
+        print(f"{'='*80}")
+
+        # Print full state vector before taking action
+        print(f"\n--- STATE BEFORE ACTION ---")
+        print(f"State vector: [{obs[0]:.6f}, {obs[1]:.6f}, {obs[2]:.6f}, {obs[3]:.6f}]")
+        print(f"  x         = {obs[0]:.6f} m")
+        print(f"  x_dot     = {obs[1]:.6f} m/s")
+        print(f"  theta     = {obs[2]:.6f} rad ({np.degrees(obs[2]):.3f}°)")
+        print(f"  theta_dot = {obs[3]:.6f} rad/s")
+
+        # Get action from HDP agent with detailed logging
+        print(f"\n--- ACTION SELECTION ---")
+        action = agent.get_action(obs)
+
+        # Also show the raw actor output for debugging
+        obs_tensor = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
+        with torch.no_grad():
+            action_normalized = agent.actor(obs_tensor)
+            action_normalized_np = action_normalized.cpu().numpy().flatten()
+
+        print(f"Actor output (tanh, [-1,1]): {action_normalized_np}")
+        print(f"Scaled action (force):        {action[0]:.6f} N")
 
         # Take step
-        obs, reward, terminated, truncated, info = env.step(action)
+        next_obs, reward, terminated, truncated, info = env.step(action)
         total_reward += reward
 
-        # Render
-        env.render()
+        # Print transition tuple
+        print(f"\n--- TRANSITION TUPLE ---")
+        print(f"state:      [{obs[0]:.6f}, {obs[1]:.6f}, {obs[2]:.6f}, {obs[3]:.6f}]")
+        print(f"action:     [{action[0]:.6f}]")
+        print(f"reward:     {reward:.6f}")
+        print(f"next_state: [{next_obs[0]:.6f}, {next_obs[1]:.6f}, {next_obs[2]:.6f}, {next_obs[3]:.6f}]")
+        print(f"done:       {terminated}")
 
-        # Log every 10 steps
-        if (step + 1) % 10 == 0:
-            print(f"Step {step + 1}: x={obs[0]:.3f}, theta={obs[2]:.3f} rad, reward={reward:.3f}")
+        # Update agent - use the agent's update method directly
+        print(f"\n{'-'*80}")
+        print(f"CALLING AGENT UPDATE METHOD")
+        print(f"{'-'*80}")
+
+        # Convert to tensors for logging
+        obs_t = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
+        action_t = torch.tensor(action, dtype=torch.float32, device=device).unsqueeze(0)
+        next_obs_t = torch.tensor(next_obs, dtype=torch.float32, device=device).unsqueeze(0)
+
+        print(f"\n--- PREDICTIONS BEFORE UPDATE ---")
+        with torch.no_grad():
+            # Current V-value
+            if agent.prev_obs is not None:
+                V_prev = agent.critic(agent.prev_obs)
+                print(f"Critic V(s_prev):             {V_prev.item():.6f}")
+            else:
+                print(f"Critic V(s_prev):             None (first step)")
+
+            V_current = agent.critic(obs_t)
+            print(f"Critic V(s):                  {V_current.item():.6f}")
+
+            # Model prediction
+            model_input = torch.cat([obs_t, action_t], dim=-1)
+            next_state_pred = agent.model(model_input)
+            print(f"Model predicted next state:   {next_state_pred.cpu().numpy().flatten()}")
+            print(f"Actual next state:            {next_obs}")
+
+        # Call agent update
+        agent.update(obs, action, reward, terminated, next_obs)
+
+        print(f"\n--- PREDICTIONS AFTER UPDATE ---")
+        with torch.no_grad():
+            # New predictions
+            new_V_current = agent.critic(obs_t)
+            new_actor_output = agent.actor(obs_t)
+
+            # New model prediction
+            new_model_input = torch.cat([obs_t, action_t], dim=-1)
+            new_next_state_pred = agent.model(new_model_input)
+
+            print(f"New Critic V(s):              {new_V_current.item():.6f}")
+            print(f"New Actor output:             {new_actor_output.cpu().numpy().flatten()}")
+            print(f"New Model next state pred:    {new_next_state_pred.cpu().numpy().flatten()}")
+            print(f"Model prediction error:       {np.linalg.norm(new_next_state_pred.cpu().numpy().flatten() - next_obs):.6f}")
+
+        print(f"\n{'-'*80}")
+        print(f"END OF UPDATE")
+        print(f"{'-'*80}")
+
+        # Update observation
+        obs = next_obs
+
+        # Render the current state
+        env.render()
 
         # Check if episode ended
         if terminated or truncated:
-            print(f"\nEpisode ended at step {step + 1}")
+            print(f"\n{'!'*80}")
+            print(f"EPISODE ENDED AT STEP {step + 1}")
+            print(f"{'!'*80}")
             if terminated:
                 print("Reason: TERMINATED")
-                print(f"  |theta| = {abs(obs[2]):.4f} rad (limit: {env.theta_max:.4f} rad)")
-                print(f"  |x|     = {abs(obs[0]):.4f} m   (limit: {env.x_max:.4f} m)")
-                if abs(obs[2]) > env.theta_max:
-                    print(f"  -> Pendulum angle exceeded limit!")
-                if abs(obs[0]) > env.x_max:
-                    print(f"  -> Cart position exceeded limit!")
+                print(f"  |theta| = {abs(obs[2]):.6f} rad (limit: {env.theta_max:.6f} rad)")
+                print(f"  |x|     = {abs(obs[0]):.6f} m   (limit: {env.x_max:.6f} m)")
             if truncated:
-                print("Reason: TRUNCATED (max steps reached)")
+                print("Reason: TRUNCATED")
             break
 
-    print(f"\nTotal reward: {total_reward:.2f}")
-    print("\nClose the window to exit...")
+    print(f"\n{'='*80}")
+    print(f"EPISODE COMPLETE")
+    print(f"{'='*80}")
+    print(f"Total steps:  {step + 1}")
+    print(f"Total reward: {total_reward:.6f}")
+    print(f"{'='*80}\n")
 
+    print("\nClose the plot window to exit...")
     # Keep window open
     plt.ioff()
     plt.show()

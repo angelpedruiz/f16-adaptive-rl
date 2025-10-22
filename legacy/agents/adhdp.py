@@ -11,8 +11,8 @@ This module defines an actor–critic architecture where:
   long-term reward as estimated by the critic.
 
 Learning objective:
-    Critic loss: L_c = 0.5 * [V(S_t, A_t) - (R_t + γ(1 - done) * V(S_{t+1}, A_{t+1}))]^2
-    Actor  loss: L_a = -V(S_t, A_t)  (negative to maximize via gradient descent)
+    Critic loss: L_c = 0.5 * [Q(S_t, A_t) - (R_t + γ(1 - done) * Q(S_{t+1}, A_{t+1}))]^2
+    Actor  loss: L_a = -Q(S_t, A_t)  (negative to maximize via gradient descent)
 
 This corresponds to the action-dependent HDP algorithm, where both actor and critic
 are updated using backpropagation through differentiable neural networks.
@@ -20,7 +20,7 @@ are updated using backpropagation through differentiable neural networks.
 
 
 class Actor(nn.Module):
-    ''' Actor Network for ADHDP: St -> At. Trained to maximize value V(s,a)'''
+    ''' Actor Network for ADHDP: St -> At. Trained to maximize value Q(s,a)'''
     def __init__(self, obs_dim: int, act_dim: int, hidden_sizes: list):
         super().__init__()
         layers = []
@@ -29,15 +29,21 @@ class Actor(nn.Module):
             layers.append(nn.Linear(prev_size, hidden_size))
             layers.append(nn.ReLU())
             prev_size = hidden_size
-        layers.append(nn.Linear(prev_size, act_dim)) # Output layer
+
+        # Output layer with small initialization for stable initial policy
+        output_layer = nn.Linear(prev_size, act_dim)
+        nn.init.uniform_(output_layer.weight, -3e-3, 3e-3)
+        nn.init.uniform_(output_layer.bias, -3e-3, 3e-3)
+        layers.append(output_layer)
         layers.append(nn.Tanh()) # Output in [-1, 1] for continuous action space
+
         self.model = nn.Sequential(*layers)
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         return self.model(obs)
 
 class Critic(nn.Module):
-    ''' Critic Network for ADHDP: (St, At) -> V(s,a) (value/reward-to-go) [float]'''
+    ''' Critic Network for ADHDP: (St, At) -> Q(s,a) (value/reward-to-go) [float]'''
     def __init__(self, obs_dim: int, act_dim: int, hidden_sizes: list):
         super().__init__()
         layers = []
@@ -46,7 +52,14 @@ class Critic(nn.Module):
             layers.append(nn.Linear(prev_size, hidden_size))
             layers.append(nn.ReLU())
             prev_size = hidden_size
-        layers.append(nn.Linear(prev_size, 1)) # Output layer
+
+        # Output layer with better initialization for negative Q-values
+        output_layer = nn.Linear(prev_size, 1)
+        # Initialize output layer with small weights to start near zero
+        nn.init.uniform_(output_layer.weight, -3e-3, 3e-3)
+        nn.init.uniform_(output_layer.bias, -3e-3, 3e-3)
+        layers.append(output_layer)
+
         self.model = nn.Sequential(*layers)
 
     def forward(self, obs: torch.Tensor, act: torch.Tensor) -> torch.Tensor:
@@ -92,11 +105,11 @@ class ADHDPAgent():
         """
         Update actor and critic networks using the ADHDP algorithm.
 
-        The critic learns the value function V(s,a) using the Bellman equation:
-            V(s,a) = reward + γ * (1 - done) * V(s',a')
+        The critic learns the value function Q(s,a) using the Bellman equation:
+            Q(s,a) = reward + γ * (1 - done) * Q(s',a')
 
         The actor is trained to maximize the expected value:
-            max_a V(s,a) => min_a -V(s,a)
+            max_a Q(s,a) => min_a -Q(s,a)
 
         Args:
             obs: Current observation
@@ -113,15 +126,15 @@ class ADHDPAgent():
         next_obs = torch.tensor(next_obs, dtype=torch.float32, device=self.device).unsqueeze(0)
 
         # ===== Critic Update =====
-        # Compute TD target: reward + γ * V(s', a')
+        # Compute TD target: reward + γ * Q(s', a')
         with torch.no_grad():
-            next_action = self.actor(next_obs)
-            V_next = self.critic(next_obs, next_action)
-            td_target = reward + self.gamma * (1 - done) * V_next
+            next_action = self.actor(next_obs) # A_t+1
+            Q_next = self.critic(next_obs, next_action) # Q(s', a')
+            td_target = reward + self.gamma * (1 - done) * Q_next
 
         # Compute TD error
-        V_pred = self.critic(obs, action)
-        td_error = td_target - V_pred
+        Q_pred = self.critic(obs, action) # forward pass to get Q(s, a)
+        td_error = td_target - Q_pred
         critic_loss = 0.5 * ((td_error) ** 2).mean()
 
         self.critic_optimizer.zero_grad()
@@ -129,8 +142,8 @@ class ADHDPAgent():
         self.critic_optimizer.step()
 
         # ===== Actor Update =====
-        # Maximize V(s, a) by minimizing -V(s, a)
-        actor_loss = -self.critic(obs, self.actor(obs)).mean()
+        # Maximize Q(s, a) by minimizing -Q(s, a)
+        actor_loss = -self.critic(obs, self.actor(obs)).mean() # -Q(s, a)
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
