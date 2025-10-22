@@ -37,6 +37,8 @@ class PendulumCartTrainer():
             'actions': [],
             'rewards': [],
             'critic_errors': [],
+            'critic_predictions': [],
+            'critic_targets': [],
             'model_errors': [],
             'model_predictions': [],
             'true_states': [],
@@ -69,13 +71,25 @@ class PendulumCartTrainer():
         agent.prev_obs = torch.FloatTensor(obs).unsqueeze(0)
         agent.prev_reward = torch.FloatTensor([0.0]).unsqueeze(0)
 
-        for _ in tqdm.tqdm(range(max_steps), desc="Training HDP Agent", unit="step"):
+        for step in tqdm.tqdm(range(max_steps), desc="Training HDP Agent", unit="step"):
             # Get action from agent
             action = agent.get_action(obs)
 
             # Take step in environment
             next_obs, reward, terminated, truncated, _ = self.env.step(action)
             done = terminated or truncated
+            
+            # PRINT OUTPUT OF EACH LAYER IN ACTOR NETWORK
+            if step % 10 == 0:
+                obs_tensor = torch.FloatTensor(obs).unsqueeze(0)
+
+                # Forward pass through actor up to last linear layer (exclude tanh)
+                x = obs_tensor
+                for layer in agent.actor.model[:-1]:  # all layers except last tanh
+                    x = layer(x)
+                    if isinstance(layer, torch.nn.Linear):
+                        print("Actor layer pre-activation mean/std:", x.mean().item(), x.std().item())
+
 
             # Update agent and get metrics
             metrics = agent.update(obs, action, reward, terminated, next_obs)
@@ -88,6 +102,8 @@ class PendulumCartTrainer():
             training_data['losses']['critic'].append(metrics['losses']['critic_loss'])
             training_data['losses']['model'].append(metrics['losses']['model_loss'])
             training_data['critic_errors'].append(metrics['critic_error'])
+            training_data['critic_predictions'].append(metrics['critic_prediction'])
+            training_data['critic_targets'].append(metrics['critic_target'])
             training_data['model_errors'].append(metrics['model_error'])
             training_data['model_predictions'].append(metrics['model_prediction'])
             training_data['true_states'].append(metrics['true_state'])
@@ -98,10 +114,22 @@ class PendulumCartTrainer():
 
             # Handle episode end
             if done:
-                #obs, _ = self.env.reset()
-                break # only one episode
+                obs, _ = self.env.reset()
+                #break # only one episode
             else:
                 obs = next_obs
+                
+        # print final actor parameters
+        for name, param in agent.actor.state_dict().items():
+            print(f"{name}: {param}")
+            
+        print("\n=== Actor Gradients ===")
+        for name, param in agent.actor.named_parameters():
+            if param.grad is not None:
+                print(f"{name} grad norm: {param.grad.norm().item()}")
+            else:
+                print(f"{name} grad is None")
+
 
         return training_data
     
@@ -115,16 +143,16 @@ if __name__ == "__main__":
 
     # ------- Parameters -------
     max_steps_per_episode = 300
-    training_max_steps = 300
+    training_max_steps = 1000
     dt = 0.01
 
     gamma = 0.99
     lr_actor = 5e-2
     lr_critic = 1e-1
-    lr_model = 1e-3
-    actor_sizes = [32, 32]
-    critic_sizes = [32, 32]
-    model_sizes = [32, 32]
+    lr_model = 5e-1
+    actor_sizes = [6, 6]
+    critic_sizes = [6, 6]
+    model_sizes = [10, 10]
 
     # Create timestamped results directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -157,12 +185,12 @@ if __name__ == "__main__":
     # ------- Plotting -------
     plotting_manager = PlottingManager(env=env, agent=agent, save_dir=save_dir)
     
-    # Render animation of the episode
-    plotting_manager.render_pendulumcart_env(
-        states=training_data['states'],
-        filename='pendulum_animation.gif',
-        fps=30
-    )
+    # # Render animation of the episode
+    # plotting_manager.render_pendulumcart_env(
+    #     states=training_data['states'],
+    #     filename='pendulum_animation.gif',
+    #     fps=30
+    # )
 
     # Plot trajectory
     plotting_manager.plot_pendulumcart_trajectory(

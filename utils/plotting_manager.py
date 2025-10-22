@@ -202,6 +202,8 @@ class PlottingManager:
         Args:
             training_data: Dictionary containing training metrics with keys:
                 - 'critic_errors': List of critic TD errors
+                - 'critic_predictions': List of critic state predictions
+                - 'critic_targets': List of critic target states
                 - 'model_errors': List of model prediction errors
                 - 'losses': Dict with 'actor', 'critic', 'model' keys
                 - 'weight_norms': Dict with 'actor', 'critic', 'model' keys
@@ -246,6 +248,13 @@ class PlottingManager:
             self._plot_model_predictions(training_data['model_predictions'],
                                         training_data['true_states'], 'model_predictions.png')
             print(f"✓ Plotted model predictions{' (saved)' if self.save_dir else ''}")
+
+        # Plot critic prediction vs target
+        if ('critic_predictions' in training_data and 'critic_targets' in training_data
+            and training_data['critic_predictions'] and training_data['critic_targets']):
+            self._plot_net_prediction(training_data['critic_predictions'],
+                                        training_data['critic_targets'], 'critic_predictions.png', 'Critic Predictions vs Targets', 'State Value')
+            print(f"✓ Plotted critic predictions{' (saved)' if self.save_dir else ''}")
 
         print(f"\n{'='*50}")
         print("HDP Learning visualization complete!")
@@ -363,7 +372,25 @@ class PlottingManager:
 
         plt.tight_layout()
         PlotTools.save_or_show(fig, self._get_save_path(filename))
-    
+
+    def _plot_net_prediction(self, prediction: np.ndarray, target: np.ndarray, filename: str = 'net_prediction.png', title: str = 'Network Prediction vs Target', ylabel: str = 'Value'):
+        """
+        Plot single plot of network prediction vs target for episode.
+
+        Args:
+            prediction: Predicted state
+            target: Actual state
+            filename: Filename for saving (used only if save_dir was set in constructor)
+        """
+        fig, ax = plt.subplots(figsize=(10, 6))
+        timesteps = np.arange(len(prediction))
+
+        ax.plot(timesteps, target, 'b-', linewidth=2, label='Target', alpha=0.8)
+        ax.plot(timesteps, prediction, 'r--', linewidth=2, label='Predicted', alpha=0.8)
+
+        PlotTools.apply_common_styling(ax, 'Timestep', ylabel, title)
+        PlotTools.save_or_show(fig, self._get_save_path(filename))
+        
     
 class PlotTools:
     ''' Helper class for the PlottingManager to keep PlottingManager clean. '''

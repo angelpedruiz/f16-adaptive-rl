@@ -6,30 +6,39 @@ import torch.nn as nn
 import numpy as np
 import gymnasium as gym
 
+
+
 class Actor(nn.Module):
-    ''' Actor Network for HDP: pi: x_t -> u_t. Trained to maximize value V(x_t)'''
+    ''' Actor Network for HDP with LayerNorm and stable output '''
     def __init__(self, obs_dim: int, act_dim: int, hidden_sizes: list):
         super().__init__()
         layers = []
         prev_size = obs_dim
+
+        # Hidden layers
         for hidden_size in hidden_sizes:
-            layers.append(nn.Linear(prev_size, hidden_size))
+            linear = nn.Linear(prev_size, hidden_size)
+            nn.init.xavier_uniform_(linear.weight)  # Xavier init for hidden layers
+            nn.init.zeros_(linear.bias)
+            layers.append(linear)
+            layers.append(nn.LayerNorm(hidden_size))  # normalize hidden activations
             layers.append(nn.Tanh())
-            nn.init.xavier_uniform_(layers[-2].weight)  # Xavier initialization for weights
-            nn.init.zeros_(layers[-2].bias)           # Zero initialization for biases
             prev_size = hidden_size
 
-        # Output layer with small initialization for stable initial policy
+        # Output layer with small uniform initialization
         output_layer = nn.Linear(prev_size, act_dim)
         nn.init.uniform_(output_layer.weight, -3e-3, 3e-3)
         nn.init.uniform_(output_layer.bias, -3e-3, 3e-3)
         layers.append(output_layer)
-        layers.append(nn.Tanh()) # Output in [-1, 1] for continuous action space
+        layers.append(nn.Tanh())  # output in [-1,1]
 
         self.model = nn.Sequential(*layers)
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        return self.model(obs)
+        x = self.model(obs)
+        return x
+
+
     
 class Critic(nn.Module):
     ''' Critic Network for HDP: V: x_t -> V_hat (value/reward-to-go) [float]'''
@@ -160,6 +169,12 @@ class HDPAgent():
         actor_loss.backward()
         self.actor_optimizer.step()
         
+        # --- Weight clipping for actor ---
+        max_weight = 0.5  # adjust based on problem scale
+        for p in self.actor.parameters():
+            if p.requires_grad:
+                p.data.clamp_(-max_weight, max_weight)
+        
         for p in self.model.parameters():
             p.requires_grad = True
         for p in self.critic.parameters():
@@ -172,6 +187,8 @@ class HDPAgent():
         with torch.no_grad():
             return {
                 'critic_error': td_error.abs().item(),
+                'critic_prediction': value_pred.detach().squeeze(0).numpy(),
+                'critic_target': target_value.detach().squeeze(0).numpy(),
                 'model_error': (next_obs - next_obs_pred).abs().mean().item(),
                 'model_prediction': next_obs_pred.detach().squeeze(0).numpy(),
                 'true_state': next_obs.detach().squeeze(0).numpy(),
