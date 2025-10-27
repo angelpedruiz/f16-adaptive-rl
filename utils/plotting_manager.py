@@ -215,52 +215,72 @@ class PlottingManager:
         # Plot critic TD errors
         if 'critic_errors' in training_data and training_data['critic_errors']:
             self._plot_error(training_data['critic_errors'], 'critic_errors.png')
-            print(f"✓ Plotted critic errors{' (saved)' if self.save_dir else ''}")
+            print(f"[*] Plotted critic errors{' (saved)' if self.save_dir else ''}")
 
         # Plot model prediction errors
         if 'model_errors' in training_data and training_data['model_errors']:
             self._plot_error(training_data['model_errors'], 'model_errors.png')
-            print(f"✓ Plotted model errors{' (saved)' if self.save_dir else ''}")
+            print(f"[*] Plotted model errors{' (saved)' if self.save_dir else ''}")
 
         # Plot losses (actor, critic, model)
         if 'losses' in training_data and training_data['losses']:
             self._plot_losses(training_data['losses'], 'losses.png')
-            print(f"✓ Plotted losses{' (saved)' if self.save_dir else ''}")
+            print(f"[*] Plotted losses{' (saved)' if self.save_dir else ''}")
 
         # Plot weight norms
         if 'weight_norms' in training_data and training_data['weight_norms']:
             self._plot_weight_norms(training_data['weight_norms'], 'weight_norms.png')
-            print(f"✓ Plotted weight norms{' (saved)' if self.save_dir else ''}")
+            print(f"[*] Plotted weight norms{' (saved)' if self.save_dir else ''}")
 
         # Plot weight update norms
         if 'weight_update_norms' in training_data and training_data['weight_update_norms']:
             self._plot_weight_update_norms(training_data['weight_update_norms'], 'weight_update_norms.png')
-            print(f"✓ Plotted weight update norms{' (saved)' if self.save_dir else ''}")
+            print(f"[*] Plotted weight update norms{' (saved)' if self.save_dir else ''}")
 
         # Plot gradient norms
         if 'gradient_norms' in training_data and training_data['gradient_norms']:
             self._plot_gradient_norms(training_data['gradient_norms'], 'gradient_norms.png')
-            print(f"✓ Plotted gradient norms{' (saved)' if self.save_dir else ''}")
+            print(f"[*] Plotted gradient norms{' (saved)' if self.save_dir else ''}")
 
         # Plot model predictions vs actual states
         if ('model_predictions' in training_data and 'true_states' in training_data
             and training_data['model_predictions'] and training_data['true_states']):
             self._plot_model_predictions(training_data['model_predictions'],
                                         training_data['true_states'], 'model_predictions.png')
-            print(f"✓ Plotted model predictions{' (saved)' if self.save_dir else ''}")
+            print(f"[*] Plotted model predictions{' (saved)' if self.save_dir else ''}")
 
         # Plot critic prediction vs target
         if ('critic_predictions' in training_data and 'critic_targets' in training_data
             and training_data['critic_predictions'] and training_data['critic_targets']):
             self._plot_net_prediction(training_data['critic_predictions'],
                                         training_data['critic_targets'], 'critic_predictions.png', 'Critic Predictions vs Targets', 'State Value')
-            print(f"✓ Plotted critic predictions{' (saved)' if self.save_dir else ''}")
+            print(f"[*] Plotted critic predictions{' (saved)' if self.save_dir else ''}")
 
         print(f"\n{'='*50}")
         print("HDP Learning visualization complete!")
         if self.save_dir:
             print(f"All plots saved to: {self.save_dir}")
         print('='*50)
+        
+    def plot_ihdp_learning(self, training_data: dict):
+        """
+        Plot comprehensive iHDP learning metrics using all internal plotting methods.
+
+        Args:
+            training_data: Dictionary containing training metrics with keys:
+                - 'critic_errors': List of critic TD errors
+                - 'critic_predictions': List of critic state predictions
+                - 'critic_targets': List of critic target states
+                - 'model_errors': List of model prediction errors
+                - 'model_predictions': List of predicted states
+                - 'true_states': List of actual states
+                - 'losses': Dict with 'actor', 'critic' keys
+                - 'weight_norms': Dict with 'actor', 'critic' keys
+                - 'weight_update_norms': Dict with 'actor', 'critic' keys
+                - 'gradient_norms': Dict with 'actor', 'critic' keys
+        """
+        # Reuse HDP plotting method since metrics are similar
+        self.plot_hdp_learning(training_data)
     
     def _plot_error(self, errors: list[float], filename: str):
         """Plot training errors (TD errors, model errors, etc.)."""
