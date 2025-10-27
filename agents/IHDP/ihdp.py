@@ -19,7 +19,7 @@ class Actor(nn.Module):
         # Hidden layers
         for hidden_size in hidden_sizes:
             linear = nn.Linear(prev_size, hidden_size)
-            nn.init.xavier_uniform_(linear.weight)  # Xavier init for hidden layers
+            nn.init.xavier_uniform_(linear.weight, gain=nn.init.calculate_gain('tanh'))  # Xavier init for hidden layers
             nn.init.zeros_(linear.bias)
             layers.append(linear)
             layers.append(nn.LayerNorm(hidden_size))  # normalize hidden activations
