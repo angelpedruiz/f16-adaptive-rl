@@ -186,6 +186,9 @@ class PendulumCartTrainer():
         agent.prev_reward = torch.FloatTensor([0.0]).unsqueeze(0)
 
         for step in tqdm.tqdm(range(max_steps), desc="Training IHDP Agent", unit="step"):
+            # print step every 10 steps:
+            if step % 10 == 0:
+                print(f"Step {step}/{max_steps}")
             # Get action from agent
             action = agent.get_action(obs)
 
@@ -253,13 +256,13 @@ if __name__ == "__main__":
 
     # ------- Parameters -------
     max_steps_per_episode = 300
-    training_max_steps = 1000
+    training_max_steps = 100
     dt = 0.01
 
     forgetting_factor = 0.8
     initial_covariance = 0.99
     gamma = 0.99
-    lr_actor = 5e-2
+    lr_actor = 1e-1
     lr_critic = 1e-1
     lr_model = 5e-1
     actor_sizes = [6, 6]
