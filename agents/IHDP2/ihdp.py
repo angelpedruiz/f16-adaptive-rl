@@ -24,18 +24,64 @@ class Actor(nn.Module):
         '''Apply alpha decay to the Actor network.'''
         pass
     
-class Critic(nn.Module):
-    def __init__(self):
-        '''Initialize the Critic network.'''
-        pass
 
-    def forward(self, state, action):
-        '''Define the forward pass of the Critic network.'''
-        pass
-    
-    def update(self):
-        '''Define the update mechanism for the Critic network.'''
-        pass
+class Critic(nn.Module):
+    def __init__(self, obs_dim: int, hidden_layers: list[int], gamma: float, lr: float):
+        super().__init__()
+        self.obs_dim = obs_dim
+        self.hidden_layers = hidden_layers
+        self.gamma = gamma
+        self.lr = lr
+        
+        # Memory
+        self.xt_1 = None
+        self.rt_1 = None
+        
+        # Construct network
+        layers = []
+        input_dim = obs_dim
+        for hidden_dim in hidden_layers:
+            layers.append(nn.Linear(input_dim, hidden_dim))
+            layers.append(nn.ReLU())
+            input_dim = hidden_dim
+        layers.append(nn.Linear(input_dim, 1))
+        self.model = nn.Sequential(*layers)
+        
+        # Optimizer
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        return self.model(obs)
+
+    def update(self, xt: torch.Tensor, rt: float, terminated: bool, xt1_est: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        # FIRST: Update parameters if we have previous state
+        if self.xt_1 is not None:
+            V_prev = self.forward(self.xt_1)
+            Vt = self.forward(xt)
+            
+            # TD target: r_{t-1} + gamma * V(x_t)
+            target = self.rt_1 + (0 if terminated else self.gamma * Vt.detach())
+            
+            # TD error
+            error = target - V_prev
+            loss = 0.5 * error**2
+            
+            # Update parameters
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+        
+        # THEN: Compute Vt1 and gradient with updated network
+        xt1_est = xt1_est.detach().requires_grad_(True)
+        
+        Vt1 = self.forward(xt1_est)
+        dVt1dxt1 = torch.autograd.grad(Vt1, xt1_est, retain_graph=True, create_graph=False)[0]
+        
+        # Update memory for next iteration
+        self.xt_1 = xt.detach()
+        self.rt_1 = rt
+
+        return Vt1.detach(), dVt1dxt1.detach()
 
 
 class IncrementalModel:
@@ -145,7 +191,7 @@ class IHDPAgent():
         r = reward
         xt1 = next_obs
             
-        # Predict next state, get G matrix and uupdate model.
+        # Predict next state, get G matrix and update model.
         xt1est = self.model.predict()
         G = self.model.G
         self.model.update(xt, ut, xt1)
