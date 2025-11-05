@@ -70,13 +70,13 @@ class Critic(nn.Module):
         prev_size = obs_dim
         for hidden_size in hidden_sizes:
             linear = nn.Linear(prev_size, hidden_size)
-            # Use Kaiming initialization for LeakyReLU with negative_slope=0.2
-            #nn.init.kaiming_uniform_(linear.weight, a=0.2, nonlinearity='leaky_relu')
-            nn.init.kaiming_uniform_(linear.weight, nonlinearity='tanh')
+            # Use Kaiming initialization for Leaky ReLU
+            nn.init.kaiming_uniform_(linear.weight, nonlinearity='leaky_relu')
             nn.init.zeros_(linear.bias)
             layers.append(linear)
-            #layers.append(nn.LeakyReLU(0.2))  # ← CHANGED FROM RELU
-            layers.append(nn.Tanh())
+            # Leaky ReLU: f(x) = x if x>0 else 0.01*x
+            # Prevents dead ReLU problem while allowing gradient flow
+            layers.append(nn.LeakyReLU(negative_slope=0.01))
             prev_size = hidden_size
 
         # Output layer with small initialization
@@ -86,8 +86,10 @@ class Critic(nn.Module):
         layers.append(output_layer)
 
         self.model = nn.Sequential(*layers)
-        
+
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        # Linear output (no activation) - gradients flow freely
+        # Weight regularization in optimizer prevents explosion
         return self.model(obs)
 
 
@@ -198,7 +200,7 @@ class RLSModel():
         return next_x
 
 class IHDPAgent():
-    def __init__(self, obs_space: gym.Space, act_space: gym.Space, gamma: float, forgetting_factor: float, initial_covariance: float, hidden_sizes: dict[str, list[int]], learning_rates: dict[str, float], weight_limit: float = 30.0, tau: float = 0.005):
+    def __init__(self, obs_space: gym.Space, act_space: gym.Space, gamma: float, forgetting_factor: float, initial_covariance: float, hidden_sizes: dict[str, list[int]], learning_rates: dict[str, float], weight_limit: float = 30.0, tau: float = 1.0):
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -226,7 +228,8 @@ class IHDPAgent():
 
         # Optimizers (no optimizer for target network!)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=learning_rates['actor'])
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=learning_rates['critic'])
+        # Add weight decay (L2 regularization) to prevent value explosion with linear output
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=learning_rates['critic'], weight_decay=1e-4)
         
         # Memory
         self.prev_obs = None
@@ -262,21 +265,87 @@ class IHDPAgent():
         activations = []
         def hook_fn(module, input, output):
             activations.append(output.detach())
-        
+
         hooks = []
         for layer in model.model:
             if isinstance(layer, nn.Tanh):
                 hooks.append(layer.register_forward_hook(hook_fn))
-        
+
         _ = model(x)
-        
+
         for i, act in enumerate(activations):
             mean_abs = act.abs().mean().item()
-            print(f"  Tanh layer {i}: mean(|activation|) = {mean_abs:.4f} "
-                f"({'SATURATED' if mean_abs > 0.9 else 'OK'})")
-        
+            status = "SATURATED" if mean_abs > 0.9 else "OK"
+            print(f"  Tanh layer {i}: mean(|activation|) = {mean_abs:.4f} [{status}]")
+
         for hook in hooks:
             hook.remove()
+
+    def diagnose_gradient_flow(self, model, x):
+        """
+        Diagnose gradient flow through critic network layer-by-layer.
+        Shows where gradients vanish with detailed per-layer analysis.
+        """
+        print("\n=== GRADIENT FLOW LAYER ANALYSIS ===")
+
+        # Zero out input gradient if it exists
+        if x.grad is not None:
+            x.grad.zero_()
+
+        # Forward pass
+        x_in = x.clone().detach().requires_grad_(True)
+        output = model(x_in)
+
+        print(f"Output V(x): {output.item():.6f}")
+
+        # Backward pass
+        output.backward(retain_graph=True)
+
+        # Get gradient at input
+        if x_in.grad is not None:
+            dVdx_norm = x_in.grad.norm().item()
+            print(f"dV/dx norm (at input): {dVdx_norm:.2e}")
+
+            if dVdx_norm < 1e-7:
+                print("[CRITICAL] Gradients have VANISHED!")
+                print("\nRoot cause analysis:")
+                print("- Check if Tanh layers are saturated (mean(|act|) > 0.9)")
+                print("- Output layer weights might be too small")
+                print("- Network depth multiplies gradient suppressions")
+            elif dVdx_norm < 1e-4:
+                print("[WARNING] Gradients are very small (potential instability)")
+            else:
+                print("[OK] Gradient flow appears healthy")
+        else:
+            print("[ERROR] No gradient computed for input!")
+
+        # Layer-by-layer activation statistics
+        print("\nActivation saturation check:")
+        activations = []
+        hooks = []
+        def capture_activation(module, input, output):
+            if isinstance(output, torch.Tensor):
+                activations.append((type(module).__name__, output.detach()))
+
+        for module in model.model:
+            if isinstance(module, nn.Tanh):
+                hooks.append(module.register_forward_hook(capture_activation))
+
+        with torch.no_grad():
+            _ = model(x.clone().detach())
+
+        for (name, act) in activations:
+            mean_abs_val = act.abs().mean().item()
+            max_abs_val = act.abs().max().item()
+            saturation_pct = (act.abs() > 0.95).float().mean().item() * 100
+            status = "[SATURATED]" if saturation_pct > 50 else "[HIGH]" if mean_abs_val > 0.7 else "[OK]"
+            print(f"  {name}: mean(|act|)={mean_abs_val:.4f}, max(|act|)={max_abs_val:.4f}, "
+                  f"saturated%={saturation_pct:.1f}% {status}")
+
+        for hook in hooks:
+            hook.remove()
+
+        print("=" * 60 + "\n")
 
     def get_action(self, obs: np.ndarray) -> np.ndarray:
         """Get action from actor network - already scaled to environment action space."""
@@ -284,6 +353,8 @@ class IHDPAgent():
         with torch.no_grad():
             action = self.actor(obs)
         action = action.squeeze(0).numpy()
+        # add noise
+        action += np.random.normal(0, 0.1, size=action.shape)
         return np.clip(action, self.act_low, self.act_high)
 
     @staticmethod
@@ -400,11 +471,13 @@ class IHDPAgent():
             print(f"  dV/d(ang_vel)  = {dVdx[3]:.6f}")
             dVdx_norm = np.linalg.norm(dVdx)
             print(f"||dV/dx|| = {dVdx_norm:.6f}")
-            
+
             if dVdx_norm < 1e-6:
-                print(f"⚠️  WARNING: Critic gradient vanishing!")
+                print("WARNING: Critic gradient vanishing!")
+                # Run diagnostic
+                self.diagnose_gradient_flow(self.critic, x_next_pred_torch)
             else:
-                print(f"✓ Gradient magnitude is healthy")
+                print("[OK] Gradient magnitude is healthy")
 
         # 5️⃣ Get model Jacobian G_t
         _, G_t = self.model.get_jacobians()
@@ -415,13 +488,13 @@ class IHDPAgent():
         
         if self.step % 10 == 0:
             print(f"\n--- ACTOR GRADIENT COMPUTATION ---")
-            print(f"dV/dx @ G = {dVdx_G} (this is ∂V/∂u)")
+            print(f"dV/dx @ G = {dVdx_G} (gradient dV/du)")
             # Handle scalar or array case
             dvdu_val = dVdx_G.item() if dVdx_G.size == 1 else dVdx_G[0]
             dldu_val = dLdu.item() if dLdu.numel() == 1 else dLdu[0].item()
-            print(f"  Interpretation: If action increases by 1N, V changes by {dvdu_val:.6f}")
+            print(f"  If action increases by 1N, V changes by {dvdu_val:.6f}")
             print(f"dL/du = -{dvdu_val:.6f} = {dldu_val:.6f}")
-            print(f"  Interpretation: Gradient says action should {'INCREASE' if dldu_val > 0 else 'DECREASE'}")
+            print(f"  Gradient says action should {'INCREASE' if dldu_val > 0 else 'DECREASE'}")
             print(f"||dL/du|| = {torch.norm(dLdu).item():.6f}")
             
             # Predict what will happen after gradient step
@@ -439,9 +512,9 @@ class IHDPAgent():
             
             # Sanity checks
             if abs(predicted_new_action) > 9.0:
-                print(f"⚠️  WARNING: Actor will saturate at action limits!")
+                print("[WARNING] Actor will saturate at action limits!")
             if abs(dldu_val) > 10.0:
-                print(f"⚠️  WARNING: Very large gradient - might cause instability!")
+                print("[WARNING] Very large gradient - might cause instability!")
 
         # 7️⃣ Apply manual gradient to actor
         self.actor.zero_grad()

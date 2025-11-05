@@ -137,7 +137,7 @@ class PendulumCartEnv(gym.Env):
         x, x_dot_val, theta, theta_dot = self.state
 
         # Reward (minimize deviation from upright and center)
-        reward = -np.abs(theta)*100 + 0.1
+        reward = -np.abs(theta)*10 + 0.1
 
         terminated = bool(abs(theta) > self.theta_max or abs(x) > self.x_max)
         if self.timestep >= self.max_steps:
