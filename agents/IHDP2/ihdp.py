@@ -1,38 +1,71 @@
 from torch import nn
 import torch
 import numpy as np
-import gimnasium as gym
+import gymnasium as gym
 
 class Actor(nn.Module):
-    def __init__(self):
-        '''Initialize the Actor network.'''
-        pass
+    '''Actor Network with decaying learning rate.'''
+    def __init__(self, obs_dim: int, act_dim: int, hidden_sizes: list[int], lr: float, lr_decay: float, lr_min: float):
+        """Initialize the Actor network."""
+        super().__init__()
+        layers = []
+        for h in hidden_sizes:
+            layers += [nn.Linear(obs_dim, h), nn.Tanh()]
+            obs_dim = h
+        layers += [nn.Linear(obs_dim, act_dim), nn.Tanh()]  # final tanh for bounded actions
+        self.net = nn.Sequential(*layers)
+
+        # Learning rate and decay parameters
+        self.lr = lr
+        self.lr_decay = lr_decay
+        self.lr_min = lr_min
+
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
 
     def forward(self, state):
         '''Define the forward pass of the Actor network.'''
-        pass
+        return self.net(state) # Output action in range [-1, 1] due to final Tanh
+
+    def update(self, xt: torch.Tensor, Vt1: torch.Tensor, dVt1dxt1: torch.Tensor, G: np.ndarray):
+        """
+        Perform one online actor update using critic information.
+        xt: current state (batch_size x state_dim)
+        Vt1: critic evaluation of next state (batch_size x 1)
+        dVt1dxt1: gradient of critic w.r.t next state (batch_size x state_dim)
+        G: input distribution matrix (state_dim x action_dim)
+        """
+        
+        chain_rule = (Vt1 * torch.matmul(G.T, dVt1dxt1)).mean()
+        self.optimizer.zero_grad()
+        
+        loss = 0.5 * chain_rule**2
+        loss.backward()
+        self.optimizer.step()
+        
+        # Decay learning rate
+        self._apply_alpha_decay()
     
-    def update(self):
-        '''Define the update mechanism for the Actor network.'''
-        pass
-    
-    def _exploration(self):
-        '''Define the exploration strategy for the Actor network.'''
-        pass  
+    def _exploration(self, action, noise_scale=0.1):
+        noise = noise_scale * torch.randn_like(action)
+        return torch.clamp(action + noise, -1, 1)
     
     def _apply_alpha_decay(self):
         '''Apply alpha decay to the Actor network.'''
-        pass
+        for g in self.optimizer.param_groups:
+            g['lr'] = max(self.lr_min, g['lr'] * self.lr_decay)
+        
     
 
 class Critic(nn.Module):
-    def __init__(self, obs_dim: int, hidden_layers: list[int], gamma: float, lr: float):
+    def __init__(self, obs_dim: int, hidden_layers: list[int], gamma: float, lr: float, lr_decay: float = 0.99, lr_min: float = 1e-5):
         super().__init__()
         self.obs_dim = obs_dim
         self.hidden_layers = hidden_layers
         self.gamma = gamma
         self.lr = lr
-        
+        self.lr_decay = lr_decay
+        self.lr_min = lr_min
+
         # Memory
         self.xt_1 = None
         self.rt_1 = None
@@ -75,13 +108,21 @@ class Critic(nn.Module):
         xt1_est = xt1_est.detach().requires_grad_(True)
         
         Vt1 = self.forward(xt1_est)
-        dVt1dxt1 = torch.autograd.grad(Vt1, xt1_est, retain_graph=True, create_graph=False)[0]
+        dVt1dxt1 = torch.autograd.grad(Vt1, xt1_est, create_graph=False)[0]
+        
+        # Decay learning rate
+        self._decay_lr()
         
         # Update memory for next iteration
         self.xt_1 = xt.detach()
         self.rt_1 = rt
 
         return Vt1.detach(), dVt1dxt1.detach()
+    
+    def _decay_lr(self):
+        '''Apply learning rate decay to the Critic network.'''
+        for g in self.optimizer.param_groups:
+            g['lr'] = max(self.lr_min, g['lr'] * self.lr_decay)
 
 
 class IncrementalModel:
@@ -154,7 +195,9 @@ class IncrementalModel:
             n_samples = min(self.time_step - 1, self.L)
             A = np.hstack([self.delta_x_store[:n_samples], 
                           self.delta_u_store[:n_samples]])
-            b = np.roll(self.delta_x_store, -1, axis=0)[:n_samples]
+            b = self.delta_x_store[1:n_samples+1]
+            A = np.hstack([self.delta_x_store[:n_samples], self.delta_u_store[:n_samples]])
+
             
             # Solve LS
             params = np.linalg.lstsq(A, b, rcond=None)[0]
@@ -171,24 +214,41 @@ class IncrementalModel:
 
 class IHDPAgent():
     def __init__(self, obs_space: gym.spaces.Box, act_space: gym.spaces.Box, parameters: dict):
-        self.gamma = parameters.get('gamma')
-        self.actor_lr = parameters.get('learning_rate')
-        self.critic_lr = parameters.get('critic_learning_rate')
-        
+        obs_dim = int(np.prod(obs_space.shape))
+        act_dim = int(np.prod(act_space.shape))
+        self.gamma = parameters.get('gamma', 0.99)
 
-        self.actor = Actor()
-        self.critic = Critic()
-        self.model = IncrementalModel()
+        # actor / critic params
+        actor_hidden = parameters.get('actor_hidden', [64, 64])
+        critic_hidden = parameters.get('critic_hidden', [64, 64])
+        actor_lr = parameters.get('learning_rate', 1e-3)
+        actor_lr_decay = parameters.get('actor_lr_decay', 0.995)
+        actor_lr_min = parameters.get('actor_lr_min', 1e-5)
+        critic_lr = parameters.get('critic_learning_rate', 1e-3)
+        critic_lr_decay = parameters.get('critic_lr_decay', 0.995)
+        critic_lr_min = parameters.get('critic_lr_min', 1e-6)
+
+        self.actor = Actor(obs_dim=obs_dim, act_dim=act_dim,
+                           hidden_sizes=actor_hidden, lr=actor_lr,
+                           lr_decay=actor_lr_decay, lr_min=actor_lr_min)
+
+        self.critic = Critic(obs_dim=obs_dim, hidden_layers=critic_hidden,
+                             gamma=self.gamma, lr=critic_lr,
+                             lr_decay=critic_lr_decay, lr_min=critic_lr_min)
+
+        self.model = IncrementalModel(obs_dim=obs_dim, act_dim=act_dim)
+
     
-    def get_action(self, obs: np.ndarray) -> np.ndarray:
+    def get_action(self, obs: torch.Tensor) -> np.ndarray:
         '''Get action from the agent, to return to environment.'''
-        return self.actor(obs)
+        action = self.actor(obs).detach().numpy()
+        return action
 
     def update(self, obs: np.ndarray, action: np.ndarray, reward: float, terminated: bool, next_obs: np.ndarray):
         '''Update the agent's networks and models. main iteration loop: 1:agent.get_action(); 2:env.step(); 3:agent.update()'''
         xt = obs
         ut = action
-        r = reward
+        rt = reward
         xt1 = next_obs
             
         # Predict next state, get G matrix and update model.
@@ -197,7 +257,8 @@ class IHDPAgent():
         self.model.update(xt, ut, xt1)
         
         # Update critic
-        Vt1, dVt1dxt1 = self.critic.update(xt, ut, r, xt1, terminated, xt1est)
+        Vt1, dVt1dxt1 = self.critic.update(xt, rt, terminated, xt1est)
+        G_torch = torch.tensor(G, dtype=dVt1dxt1.dtype, device=dVt1dxt1.device)
         
         # Update actor
-        self.actor.update(xt, Vt1, dVt1dxt1, G)
+        self.actor.update(xt, Vt1, dVt1dxt1, G_torch)
