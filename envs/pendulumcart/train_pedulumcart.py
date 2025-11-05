@@ -77,9 +77,9 @@ class PendulumCartTrainer():
             action = agent.get_action(obs)
 
             # Take step in environment
-            next_obs, reward, terminated, truncated, _ = self.env.step(action)
+            next_obs, reward, terminated, truncated, info = self.env.step(action)
             done = terminated or truncated
-            
+
             # PRINT OUTPUT OF EACH LAYER IN ACTOR NETWORK
             if step % 10 == 0:
                 obs_tensor = torch.FloatTensor(obs).unsqueeze(0)
@@ -92,8 +92,8 @@ class PendulumCartTrainer():
                         print("Actor layer pre-activation mean/std:", x.mean().item(), x.std().item())
 
 
-            # Update agent and get metrics
-            metrics = agent.update(obs, action, reward, terminated, next_obs)
+            # Update agent and get metrics (using scaled action from environment)
+            metrics = agent.update(obs, info['action'], reward, terminated, next_obs)
             
             # Store data every max_steps // 10
             training_data['states'].append(env.state.copy())
@@ -193,7 +193,7 @@ class PendulumCartTrainer():
             action = agent.get_action(obs)
 
             # Take step in environment
-            next_obs, reward, terminated, truncated, _ = self.env.step(action)
+            next_obs, reward, terminated, truncated, info = self.env.step(action)
             done = terminated or truncated
 
             # Update agent and get metrics
@@ -201,7 +201,7 @@ class PendulumCartTrainer():
 
             # Store data
             training_data['states'].append(self.env.state.copy())
-            training_data['actions'].append(action)
+            training_data['actions'].append(info['force'])
             training_data['rewards'].append(reward)
             training_data['losses']['actor'].append(metrics['losses']['actor_loss'])
             training_data['losses']['critic'].append(metrics['losses']['critic_loss'])

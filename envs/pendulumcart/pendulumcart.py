@@ -124,7 +124,10 @@ class PendulumCartEnv(gym.Env):
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
         """Execute one timestep in the environment using linearized dynamics."""
+        # scale action to max force [-1,1] -> [-max_force, max_force]
+        action = action * self.max_force
         force = np.clip(action[0], -self.max_force, self.max_force)
+        force = np.array([force], dtype=np.float32)
 
         # Linearized dynamics: x_dot = A x + B u
         x_dot = self.A @ self.state + self.B.flatten() * force
@@ -145,7 +148,7 @@ class PendulumCartEnv(gym.Env):
         else:
             truncated = False
         
-        info = {'state': self.state.copy(), 'action': force, 'reward': reward}
+        info = {'state': self.state.copy(), 'force': force, 'reward': reward}
 
         return self.state.copy(), float(reward), terminated, truncated, info
     
