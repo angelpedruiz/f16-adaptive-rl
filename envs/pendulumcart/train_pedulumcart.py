@@ -264,7 +264,7 @@ if __name__ == "__main__":
 
     # ------- Parameters -------
     max_steps_per_episode = 300
-    training_max_steps = 50
+    training_max_steps = 500
     dt = 0.01
 
     forgetting_factor = 0.8
@@ -276,6 +276,7 @@ if __name__ == "__main__":
     actor_sizes = [6, 6]
     critic_sizes = [6, 6]
     model_sizes = [10, 10]
+    weight_limit = 0.5
 
     # Create timestamped results directory with hierarchical structure
     # Structure: results/[env_name]/[agent_name]/[timestamp]/
@@ -305,7 +306,8 @@ if __name__ == "__main__":
         forgetting_factor=0.99,
         initial_covariance=1.0,
         hidden_sizes={'actor': actor_sizes, 'critic': critic_sizes,},
-        learning_rates={'actor': lr_actor, 'critic': lr_critic}
+        learning_rates={'actor': lr_actor, 'critic': lr_critic}, 
+        weight_limit=weight_limit
     )
 
     # ------- Train Agent -------

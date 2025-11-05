@@ -47,7 +47,7 @@ class Critic(nn.Module):
         prev_size = obs_dim
         for hidden_size in hidden_sizes:
             linear = nn.Linear(prev_size, hidden_size)
-            nn.init.kaiming_uniform_(linear.weight, nonlinearity='tanh')
+            nn.init.normal_(linear.weight, mean=0.0, std=0.001)
             nn.init.zeros_(linear.bias)
             layers.append(linear)
             layers.append(nn.Tanh())
@@ -63,6 +63,15 @@ class Critic(nn.Module):
         
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         return self.model(obs)
+    
+    def clip_pre_tanh_weights(self, clip_value=1.0):
+        modules = list(self.model.children())
+        for i, layer in enumerate(modules[:-1]):  # skip last layer
+            if isinstance(layer, nn.Linear) and isinstance(modules[i + 1], nn.Tanh):
+                with torch.no_grad():
+                    layer.weight.clamp_(-clip_value, clip_value)
+                    layer.bias.clamp_(-clip_value, clip_value)
+
 
 
 
@@ -354,6 +363,56 @@ class IHDPAgent():
 
         return stats
 
+    def _verify_critic_gradient_finite_diff(self, x_torch: torch.Tensor, dVdx_autograd: np.ndarray, epsilon: float = 1e-5) -> dict:
+        """
+        Verify autograd gradients using finite-difference approximation.
+
+        Compares analytical gradients (from autograd) with numerical gradients (from finite differences).
+        This helps detect issues with gradient computation.
+
+        Args:
+            x_torch: Input state tensor (requires_grad=True)
+            dVdx_autograd: Autograd-computed gradient array
+            epsilon: Small perturbation for finite differences
+
+        Returns:
+            Dictionary with comparison statistics
+        """
+        x_np = x_torch.detach().cpu().numpy().flatten()
+        state_dim = len(x_np)
+
+        dVdx_fd = np.zeros(state_dim)
+
+        # Compute finite-difference gradient for each dimension
+        for i in range(state_dim):
+            # Forward perturbation
+            x_plus = x_np.copy()
+            x_plus[i] += epsilon
+            x_plus_torch = torch.FloatTensor(x_plus).unsqueeze(0)
+            V_plus = self.critic(x_plus_torch).item()
+
+            # Backward perturbation
+            x_minus = x_np.copy()
+            x_minus[i] -= epsilon
+            x_minus_torch = torch.FloatTensor(x_minus).unsqueeze(0)
+            V_minus = self.critic(x_minus_torch).item()
+
+            # Central difference: (f(x+eps) - f(x-eps)) / (2*eps)
+            dVdx_fd[i] = (V_plus - V_minus) / (2.0 * epsilon)
+
+        # Compare autograd vs finite-difference
+        diff = np.abs(dVdx_autograd - dVdx_fd)
+        rel_error = diff / (np.abs(dVdx_fd) + 1e-10)  # Avoid division by zero
+
+        return {
+            'dVdx_autograd': dVdx_autograd,
+            'dVdx_fd': dVdx_fd,
+            'abs_diff': diff,
+            'rel_error': rel_error,
+            'max_abs_diff': float(np.max(diff)),
+            'max_rel_error': float(np.max(rel_error[np.isfinite(rel_error)])),
+        }
+
     def _diagnose_critic_gradients(self, obs: torch.Tensor, target_value: torch.Tensor) -> dict:
         """
         Diagnose gradient flow through critic network layers.
@@ -418,6 +477,7 @@ class IHDPAgent():
         critic_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=1.0)
         self.critic_optimizer.step()
+        self.critic.clip_pre_tanh_weights(clip_value=self.weight_limit)
 
         critic_weight_after = list(self.critic.parameters())[0].data
 
@@ -515,6 +575,24 @@ class IHDPAgent():
                 print(f"  Param norm: {stats['param_norm']:.6f}")
                 if stats['grad_norm'] < 1e-6:
                     print("  ⚠️  VANISHING GRADIENT!")
+
+            print("\n=== FINITE-DIFFERENCE GRADIENT VERIFICATION ===")
+            print("Comparing autograd dVdx with finite-difference approximation...")
+            fd_verify = self._verify_critic_gradient_finite_diff(x_next_pred_torch, dVdx)
+            state_labels = ['cart_pos', 'cart_vel', 'angle', 'ang_vel']
+            print(f"\n{'State':<15} {'Autograd':<15} {'Finite-Diff':<15} {'Abs Diff':<15} {'Rel Error':<15}")
+            print("-" * 75)
+            for i in range(len(dVdx)):
+                label = state_labels[i] if i < len(state_labels) else f'state_{i}'
+                ag = fd_verify['dVdx_autograd'][i]
+                fd = fd_verify['dVdx_fd'][i]
+                ad = fd_verify['abs_diff'][i]
+                re = fd_verify['rel_error'][i]
+                print(f"{label:<15} {ag:<15.8f} {fd:<15.8f} {ad:<15.8e} {re:<15.4f}")
+            print(f"\nMax absolute difference: {fd_verify['max_abs_diff']:.8e}")
+            print(f"Max relative error: {fd_verify['max_rel_error']:.4f}")
+            if fd_verify['max_abs_diff'] > 1e-3:
+                print("⚠️  Large discrepancy between autograd and finite-diff! Check gradient computation.")
 
         # ------- Update memory -------
         self.prev_obs = obs_torch.detach()
