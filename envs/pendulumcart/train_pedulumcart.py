@@ -176,6 +176,8 @@ class PendulumCartTrainer():
                 'actor': [],
                 'critic': [],
             },
+            'actor_weights_history': [],
+            'critic_weights_history': [],
         }
 
         # Initialize environment
@@ -215,6 +217,10 @@ class PendulumCartTrainer():
                 training_data['weight_norms'][net].append(metrics['weights_norm'][net])
                 training_data['weight_update_norms'][net].append(metrics['weights_update_norm'][net])
                 training_data['gradient_norms'][net].append(metrics['gradients_norm'][net])
+
+            # Store weight history from metrics
+            training_data['actor_weights_history'].append(metrics['actor_weights'])
+            training_data['critic_weights_history'].append(metrics['critic_weights'])
 
             # Handle episode end
             if done:

@@ -278,9 +278,20 @@ class PlottingManager:
                 - 'weight_norms': Dict with 'actor', 'critic' keys
                 - 'weight_update_norms': Dict with 'actor', 'critic' keys
                 - 'gradient_norms': Dict with 'actor', 'critic' keys
+                - 'actor_weights_history': List of dicts with 'layer_0', 'layer_1', etc. keys containing weight arrays at each timestep
+                - 'critic_weights_history': List of dicts with 'layer_0', 'layer_1', etc. keys containing weight arrays at each timestep
         """
         # Reuse HDP plotting method since metrics are similar
         self.plot_hdp_learning(training_data)
+
+        # Plot actor and critic weight evolution over time
+        if 'actor_weights_history' in training_data and training_data['actor_weights_history']:
+            self._plot_network_weights(training_data['actor_weights_history'], 'Actor', 'actor_weights_evolution.png')
+            print(f"[*] Plotted actor weight evolution{' (saved)' if self.save_dir else ''}")
+
+        if 'critic_weights_history' in training_data and training_data['critic_weights_history']:
+            self._plot_network_weights(training_data['critic_weights_history'], 'Critic', 'critic_weights_evolution.png')
+            print(f"[*] Plotted critic weight evolution{' (saved)' if self.save_dir else ''}")
     
     def _plot_error(self, errors: list[float], filename: str):
         """Plot training errors (TD errors, model errors, etc.)."""
@@ -410,8 +421,77 @@ class PlottingManager:
 
         PlotTools.apply_common_styling(ax, 'Timestep', ylabel, title)
         PlotTools.save_or_show(fig, self._get_save_path(filename))
-        
-    
+
+    def _plot_network_weights(self, weights_history: list[dict[str, np.ndarray]], network_name: str, filename: str):
+        """
+        Plot the evolution of individual network weights over training time.
+
+        Each weight is shown as a curve, with subplots for each layer.
+
+        Args:
+            weights_history: List of weight dictionaries over time, where each dict has
+                           keys 'layer_0', 'layer_1', etc., with numpy arrays as values
+            network_name: Name of the network (e.g., 'Actor', 'Critic')
+            filename: Filename for saving the plot
+        """
+        if not weights_history or len(weights_history) == 0:
+            return
+
+        # Get layer names from first snapshot
+        first_snapshot = weights_history[0]
+        layer_names = sorted(first_snapshot.keys())
+        n_layers = len(layer_names)
+
+        if n_layers == 0:
+            return
+
+        # Calculate subplot layout
+        rows, cols = PlotTools.calculate_subplot_layout(n_layers)
+        fig, axes = plt.subplots(rows, cols, figsize=(7*cols, 5*rows))
+        fig.suptitle(f'{network_name} Weight Evolution Over Training', fontsize=14, fontweight='bold')
+
+        # Flatten axes for easier iteration
+        if n_layers == 1:
+            axes = [axes]
+        else:
+            axes = axes.flatten() if hasattr(axes, 'flatten') else axes
+
+        # Use colormap for distinct colors per weight
+        colors = plt.cm.tab20(np.linspace(0, 1, 20))
+
+        timesteps = np.arange(len(weights_history))
+
+        for layer_idx, layer_name in enumerate(layer_names):
+            ax = axes[layer_idx]
+
+            # Extract weights for this layer across all timesteps
+            weights_over_time = [snapshot[layer_name] for snapshot in weights_history]
+
+            # Flatten each weight array and plot each weight as a curve
+            n_weights = weights_over_time[0].size
+
+            for weight_idx in range(n_weights):
+                weight_curve = []
+                for w_array in weights_over_time:
+                    flat = w_array.flatten()
+                    weight_curve.append(flat[weight_idx])
+
+                color_idx = weight_idx % len(colors)
+                ax.plot(timesteps, weight_curve, color=colors[color_idx], alpha=0.7, linewidth=1)
+
+            ax.set_title(f'{layer_name} ({n_weights} weights)')
+            ax.set_xlabel('Training Step')
+            ax.set_ylabel('Weight Value')
+            ax.grid(True, alpha=0.3)
+
+        # Hide unused subplots
+        for i in range(n_layers, len(axes)):
+            axes[i].axis('off')
+
+        plt.tight_layout()
+        PlotTools.save_or_show(fig, self._get_save_path(filename))
+
+
 class PlotTools:
     ''' Helper class for the PlottingManager to keep PlottingManager clean. '''
 

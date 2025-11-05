@@ -447,8 +447,17 @@ class IHDPAgent():
         actor_grads = [p.grad.data.cpu().numpy().flatten() for p in self.actor.parameters() if p.grad is not None]
         critic_grads = [p.grad.data.cpu().numpy().flatten() for p in self.critic.parameters() if p.grad is not None]
 
+        # Collect separate weights for each layer (use .copy() to ensure independent snapshots)
+        actor_weights_by_layer = {}
+        for i, param in enumerate(self.actor.parameters()):
+            actor_weights_by_layer[f'layer_{i}'] = param.data.cpu().numpy().copy()
+
+        critic_weights_by_layer = {}
+        for i, param in enumerate(self.critic.parameters()):
+            critic_weights_by_layer[f'layer_{i}'] = param.data.cpu().numpy().copy()
+
         self.step += 1
-        
+
         return {
             'critic_error': td_error.abs().item(),
             'critic_prediction': value_pred.detach().squeeze(0).numpy(),
@@ -473,5 +482,7 @@ class IHDPAgent():
             'gradients_norm': {
                 'actor': self._compute_norm(actor_grads),
                 'critic': self._compute_norm(critic_grads),
-            }
+            },
+            'actor_weights': actor_weights_by_layer,
+            'critic_weights': critic_weights_by_layer,
         }
