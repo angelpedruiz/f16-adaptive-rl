@@ -9,15 +9,9 @@ import gymnasium as gym
 
 
 class Actor(nn.Module):
-    ''' Actor Network for HDP that directly outputs scaled actions '''
-    def __init__(self, obs_dim: int, act_dim: int, hidden_sizes: list, act_low: np.ndarray, act_high: np.ndarray):
+    ''' Actor Network for HDP outputs [-1,1] '''
+    def __init__(self, obs_dim: int, act_dim: int, hidden_sizes: list):
         super().__init__()
-        
-        # Store action bounds for scaling
-        self.register_buffer('act_low', torch.FloatTensor(act_low))
-        self.register_buffer('act_high', torch.FloatTensor(act_high))
-        self.register_buffer('action_scale', torch.FloatTensor((act_high - act_low) * 0.5))
-        self.register_buffer('action_offset', torch.FloatTensor((act_high + act_low) * 0.5))
         
         layers = []
         prev_size = obs_dim
@@ -39,27 +33,10 @@ class Actor(nn.Module):
         layers.append(output_layer)
         layers.append(nn.Tanh())  # output in [-1,1]
 
-        self.backbone = nn.Sequential(*layers)
+        self.model = nn.Sequential(*layers)
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass that outputs actions in the environment's action space.
-        
-        Args:
-            obs: Observation tensor
-            
-        Returns:
-            Scaled action in [act_low, act_high]
-        """
-        # Get normalized action in [-1, 1]
-        action_normalized = self.backbone(obs)
-        
-        # Scale to environment action space
-        # This is differentiable, so gradients flow through properly
-        action_scaled = action_normalized * self.action_scale + self.action_offset
-        
-        return action_scaled
-
+        return self.model(obs)
 
     
 class Critic(nn.Module):
@@ -198,33 +175,25 @@ class RLSModel():
         return next_x
 
 class IHDPAgent():
-    def __init__(self, obs_space: gym.Space, act_space: gym.Space, gamma: float, forgetting_factor: float, initial_covariance: float, hidden_sizes: dict[str, list[int]], learning_rates: dict[str, float], weight_limit: float = 30.0, tau: float = 0.005):
+    def __init__(self, obs_space: gym.Space, act_space: gym.Space, gamma: float, forgetting_factor: float, initial_covariance: float, hidden_sizes: dict[str, list[int]], learning_rates: dict[str, float], weight_limit: float = 30.0):
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Spaces
         self.obs_dim = obs_space.shape[0]
         self.act_dim = act_space.shape[0]
-        self.act_low = np.asarray(act_space.low, dtype=np.float32)
-        self.act_high = np.asarray(act_space.high, dtype=np.float32)
         
         # Hyperparameters
         self.gamma = gamma
         self.weight_limit = weight_limit
-        self.tau = tau  # ← NEW: Soft update coefficient for target network
 
         # Initialize Actor, Critic, and Model networks
-        self.actor = Actor(self.obs_dim, self.act_dim, hidden_sizes['actor'], self.act_low, self.act_high)
+        self.actor = Actor(self.obs_dim, self.act_dim, hidden_sizes['actor'])
         self.critic = Critic(self.obs_dim, hidden_sizes['critic'])
-        
-        # ← NEW: Initialize target critic network (frozen copy)
-        self.critic_target = Critic(self.obs_dim, hidden_sizes['critic'])
-        self.critic_target.load_state_dict(self.critic.state_dict())  # Copy weights
-        self.critic_target.eval()  # Set to eval mode (no gradient computation)
-        
+
         self.model = RLSModel(self.obs_dim, self.act_dim, forgetting_factor=forgetting_factor, delta=initial_covariance)
 
-        # Optimizers (no optimizer for target network!)
+        # Optimizers
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=learning_rates['actor'])
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=learning_rates['critic'])
         
@@ -233,58 +202,119 @@ class IHDPAgent():
         self.prev_reward = None
         self.step = 0
 
-    def _zero_biases(self, model):
-        """Zero out all biases in the model to prevent gradient vanishing."""
-        with torch.no_grad():
-            for name, param in model.named_parameters():
-                if 'bias' in name:
-                    param.zero_()
+    def _debug(self, step: int, obs: np.ndarray, action: np.ndarray, reward: float, next_obs: np.ndarray,
+               value_pred: torch.Tensor, target_value: torch.Tensor, td_error: torch.Tensor,
+               critic_weight_before: torch.Tensor, critic_weight_after: torch.Tensor,
+               actor_action_scaled: torch.Tensor, x_next_pred_np: np.ndarray, dVdx: np.ndarray,
+               dVdx_G: np.ndarray, dLdu: torch.Tensor, G_t: np.ndarray, current_action: float,
+               lr_actor: float, dldu_val: float, predicted_action_change: float, predicted_new_action: float,
+               new_action: float):
+        """
+        Debug printing for the update step. Only called when step % 10 == 0.
+        """
+        if step == 0:
+            print("\n=== Critic Architecture ===")
+            for i, layer in enumerate(self.critic.model):
+                print(f"Layer {i}: {layer}")
+            print("=" * 40 + "\n")
 
-    def _clip_weights(self, model):
-        """Clip all weights to [-weight_limit, weight_limit] to prevent saturation."""
-        with torch.no_grad():
-            for param in model.parameters():
-                param.clamp_(-self.weight_limit, self.weight_limit)
-    
-    def _soft_update_target_network(self):
-        """
-        ← NEW: Soft update target network using Polyak averaging.
-        
-        θ_target = τ * θ + (1 - τ) * θ_target
-        
-        With τ=0.005, the target network slowly tracks the main network.
-        """
-        with torch.no_grad():
-            for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
-                target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+        print(f"\n{'='*80}")
+        print(f"STEP {step}")
+        print(f"{'='*80}")
+
+        # Environment state
+        print("\n--- ENVIRONMENT STATE ---")
+        print(f"State: {obs}")
+        print(f"  cart_pos={obs[0]:.4f}, cart_vel={obs[1]:.4f}, angle={obs[2]:.4f}, angular_vel={obs[3]:.4f}")
+        print(f"Action taken (from env): {action.item():.4f} N")
+        print(f"Reward: {reward:.4f}")
+        print(f"Next state: {next_obs}")
+
+        # Critic update
+        print("\n--- CRITIC UPDATE ---")
+        print(f"V_pred={value_pred.item():.4f}, V_target={target_value.item():.4f}, TD_error={td_error.item():.4f}")
+        print(f"Critic weight change: {(critic_weight_after - critic_weight_before).abs().max().item():.6f}")
+
+        # Actor forward pass
+        print("\n--- ACTOR FORWARD PASS ---")
+        print(f"Actor output (what it wants to do): {actor_action_scaled.detach().squeeze().item():.4f} N")
+        print(f"(Compare to action taken: {action.item():.4f} N)")
+
+        # Model prediction
+        print("\n--- MODEL PREDICTION ---")
+        print(f"G matrix (control sensitivity):\n{G_t}")
+        print(f"Model predicts next state: {x_next_pred_np}")
+        print(f"True next state:           {next_obs}")
+        model_error = np.linalg.norm(x_next_pred_np - next_obs)
+        print(f"Model prediction error: {model_error:.6f}")
+
+        # Critic evaluation of predicted state
+        V_next_val = self.critic(torch.FloatTensor(x_next_pred_np).unsqueeze(0)).item()
+        actor_loss_value = -V_next_val
+        print("\n--- CRITIC EVALUATION OF PREDICTED STATE ---")
+        print(f"V(predicted_next_state) = {V_next_val:.4f}")
+        print(f"Actor loss (negative value) = {actor_loss_value:.4f}")
+
+        # Critic gradient
+        print("\n--- CRITIC GRADIENT (dV/dx) ---")
+        print(f"dV/dx = {dVdx}")
+        print(f"  dV/d(cart_pos) = {dVdx[0]:.6f} {'(+: right is better, -: left is better)' if abs(dVdx[0]) > 1e-6 else '(~0: neutral)'}")
+        print(f"  dV/d(cart_vel) = {dVdx[1]:.6f}")
+        print(f"  dV/d(angle)    = {dVdx[2]:.6f} {'(+: more upright is better, -: more fallen is better)' if abs(dVdx[2]) > 1e-6 else '(~0: neutral)'}")
+        print(f"  dV/d(ang_vel)  = {dVdx[3]:.6f}")
+        dVdx_norm = np.linalg.norm(dVdx)
+        print(f"||dV/dx|| = {dVdx_norm:.6f}")
+
+        if dVdx_norm < 1e-6:
+            print("⚠️  WARNING: Critic gradient vanishing!")
+        else:
+            print("✓ Gradient magnitude is healthy")
+
+        # Actor gradient computation
+        print("\n--- ACTOR GRADIENT COMPUTATION ---")
+        print(f"dV/dx @ G = {dVdx_G} (this is ∂V/∂u)")
+        dvdu_val = dVdx_G.item() if dVdx_G.size == 1 else dVdx_G[0]
+        dldu_val_actual = dLdu.item() if dLdu.numel() == 1 else dLdu[0].item()
+        print(f"  Interpretation: If action increases by 1N, V changes by {dvdu_val:.6f}")
+        print(f"dL/du = -{dvdu_val:.6f} = {dldu_val_actual:.6f}")
+        print(f"  Interpretation: Gradient says action should {'INCREASE' if dldu_val_actual > 0 else 'DECREASE'}")
+        print(f"||dL/du|| = {torch.norm(dLdu).item():.6f}")
+
+        # Gradient step prediction
+        print("\n--- GRADIENT STEP PREDICTION ---")
+        print(f"Learning rate: {lr_actor}")
+        print(f"Current action output: {current_action:.4f} N")
+        print(f"Gradient: {dldu_val:.6f}")
+        print(f"Predicted action change: {predicted_action_change:.6f} N")
+        print(f"Predicted new action: {predicted_new_action:.4f} N")
+
+        # Sanity checks
+        if abs(predicted_new_action) > 9.0:
+            print("⚠️  WARNING: Actor will saturate at action limits!")
+        if abs(dldu_val) > 10.0:
+            print("⚠️  WARNING: Very large gradient - might cause instability!")
+
+        # Actual parameter gradients
+        print("\n--- ACTUAL PARAMETER GRADIENTS (before clipping) ---")
+        for name, param in self.actor.named_parameters():
+            if param.grad is not None:
+                print(f"{name}: grad_norm={param.grad.norm().item():.6f}, grad_mean={param.grad.mean().item():.6f}")
+
+        # After actor update
+        print("\n--- AFTER ACTOR UPDATE ---")
+        print(f"New actor output: {new_action:.4f} N (was {current_action:.4f} N)")
+        print(f"Actual change: {new_action - current_action:.6f} N")
+        print(f"{'='*80}\n")
                 
-    def check_activation_stats(self, model, x):
-        activations = []
-        def hook_fn(module, input, output):
-            activations.append(output.detach())
-        
-        hooks = []
-        for layer in model.model:
-            if isinstance(layer, nn.Tanh):
-                hooks.append(layer.register_forward_hook(hook_fn))
-        
-        _ = model(x)
-        
-        for i, act in enumerate(activations):
-            mean_abs = act.abs().mean().item()
-            print(f"  Tanh layer {i}: mean(|activation|) = {mean_abs:.4f} "
-                f"({'SATURATED' if mean_abs > 0.9 else 'OK'})")
-        
-        for hook in hooks:
-            hook.remove()
+
 
     def get_action(self, obs: np.ndarray) -> np.ndarray:
-        """Get action from actor network - already scaled to environment action space."""
+        """Get action from actor network - [-1,1]"""
         obs = torch.FloatTensor(obs).unsqueeze(0)
         with torch.no_grad():
             action = self.actor(obs)
         action = action.squeeze(0).numpy()
-        return np.clip(action, self.act_low, self.act_high)
+        return action # [-1,1]
 
     @staticmethod
     def _compute_norm(grad_list):
@@ -316,12 +346,12 @@ class IHDPAgent():
                         action_torch.detach().numpy().squeeze(),
                         next_obs_torch.detach().numpy().squeeze())
 
-        # ------- Update Critic (TD(0) with TARGET network) -------
+        # ------- Update Critic (TD(0)) -------
         critic_weight_before = list(self.critic.parameters())[0].data.clone()
-        
+
         with torch.no_grad():
-            target_value = reward_torch + self.gamma * self.critic_target(next_obs_torch)
-        
+            target_value = reward_torch + self.gamma * self.critic(next_obs_torch)
+
         value_pred = self.critic(obs_torch)
         td_error = target_value - value_pred
         critic_loss = 0.5 * td_error.pow(2).mean()
@@ -330,139 +360,79 @@ class IHDPAgent():
         critic_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=1.0)
         self.critic_optimizer.step()
-        
-        self._soft_update_target_network()
-        
-        # Diagnostic prints
-        if self.step % 10 == 0:
-            print(f"\n{'='*80}")
-            print(f"STEP {self.step}")
-            print(f"{'='*80}")
-            
-            print(f"\n--- ENVIRONMENT STATE ---")
-            print(f"State: {obs}")
-            print(f"  cart_pos={obs[0]:.4f}, cart_vel={obs[1]:.4f}, angle={obs[2]:.4f}, angular_vel={obs[3]:.4f}")
-            print(f"Action taken (from env): {action.item():.4f} N")  # ← Fixed
-            print(f"Reward: {reward:.4f}")
-            print(f"Next state: {next_obs}")
-            
-            print(f"\n--- CRITIC UPDATE ---")
-            print(f"V_pred={value_pred.item():.4f}, V_target={target_value.item():.4f}, TD_error={td_error.item():.4f}")
-            critic_weight_after = list(self.critic.parameters())[0].data
-            print(f"Critic weight change: {(critic_weight_after - critic_weight_before).abs().max().item():.6f}")
+
+        critic_weight_after = list(self.critic.parameters())[0].data
 
         # ------- Update Actor (manual gradient via RLS Jacobian) -------
         # 1️⃣ Forward pass through actor
         actor_action_scaled = self.actor(obs_torch)
         actor_action_scaled.retain_grad()
 
-        if self.step % 10 == 0:
-            print(f"\n--- ACTOR FORWARD PASS ---")
-            print(f"Actor output (what it wants to do): {actor_action_scaled.detach().squeeze().item():.4f} N")  # ← Fixed
-            print(f"(Compare to action taken: {action.item():.4f} N)")  # ← Fixed
-
         # 2️⃣ Predict next state with actor's scaled action
         x_np = obs_torch.detach().squeeze().numpy()
         u_np = actor_action_scaled.detach().squeeze().numpy()
-        
+
         x_next_pred_np = self.model.predict(x_np, u_np)
         x_next_pred_torch = torch.FloatTensor(x_next_pred_np).unsqueeze(0)
         x_next_pred_torch.requires_grad_(True)
-
-        if self.step % 10 == 0:
-            print(f"\n--- MODEL PREDICTION ---")
-            F, G = self.model.get_jacobians()
-            print(f"G matrix (control sensitivity):\n{G}")
-            print(f"Model predicts next state: {x_next_pred_np}")
-            print(f"True next state:           {next_obs}")
-            model_error = np.linalg.norm(x_next_pred_np - next_obs)
-            print(f"Model prediction error: {model_error:.6f}")
 
         # 3️⃣ Critic evaluation on predicted next state
         V_next = self.critic(x_next_pred_torch)
         actor_loss_value = -V_next.item()
 
-        if self.step % 10 == 0:
-            print(f"\n--- CRITIC EVALUATION OF PREDICTED STATE ---")
-            print(f"V(predicted_next_state) = {V_next.item():.4f}")
-            print(f"Actor loss (negative value) = {actor_loss_value:.4f}")
-
         # 4️⃣ Compute ∂V/∂x_{t+1}
         V_next.backward()
         dVdx = x_next_pred_torch.grad.detach().numpy().squeeze()
-        
-        if self.step % 10 == 0:
-            print(f"\n--- CRITIC GRADIENT (dV/dx) ---")
-            print(f"dV/dx = {dVdx}")
-            print(f"  dV/d(cart_pos) = {dVdx[0]:.6f} {'(+: right is better, -: left is better)' if abs(dVdx[0]) > 1e-6 else '(~0: neutral)'}")
-            print(f"  dV/d(cart_vel) = {dVdx[1]:.6f}")
-            print(f"  dV/d(angle)    = {dVdx[2]:.6f} {'(+: more upright is better, -: more fallen is better)' if abs(dVdx[2]) > 1e-6 else '(~0: neutral)'}")
-            print(f"  dV/d(ang_vel)  = {dVdx[3]:.6f}")
-            dVdx_norm = np.linalg.norm(dVdx)
-            print(f"||dV/dx|| = {dVdx_norm:.6f}")
-            
-            if dVdx_norm < 1e-6:
-                print(f"⚠️  WARNING: Critic gradient vanishing!")
-            else:
-                print(f"✓ Gradient magnitude is healthy")
 
         # 5️⃣ Get model Jacobian G_t
         _, G_t = self.model.get_jacobians()
-        
+
         # 6️⃣ Compute gradient: ∂L/∂u = -∂V/∂x * ∂x/∂u
         dVdx_G = dVdx @ G_t  # This is ∂V/∂u (how V changes with action)
         dLdu = -torch.FloatTensor(dVdx_G)  # Negative because we want to maximize V
-        
-        if self.step % 10 == 0:
-            print(f"\n--- ACTOR GRADIENT COMPUTATION ---")
-            print(f"dV/dx @ G = {dVdx_G} (this is ∂V/∂u)")
-            # Handle scalar or array case
-            dvdu_val = dVdx_G.item() if dVdx_G.size == 1 else dVdx_G[0]
-            dldu_val = dLdu.item() if dLdu.numel() == 1 else dLdu[0].item()
-            print(f"  Interpretation: If action increases by 1N, V changes by {dvdu_val:.6f}")
-            print(f"dL/du = -{dvdu_val:.6f} = {dldu_val:.6f}")
-            print(f"  Interpretation: Gradient says action should {'INCREASE' if dldu_val > 0 else 'DECREASE'}")
-            print(f"||dL/du|| = {torch.norm(dLdu).item():.6f}")
-            
-            # Predict what will happen after gradient step
-            current_action = actor_action_scaled.detach().squeeze().item()  # ← Fixed
-            lr_actor = self.actor_optimizer.param_groups[0]['lr']
-            predicted_action_change = -lr_actor * dldu_val  # Negative because optimizer does gradient descent
-            predicted_new_action = current_action + predicted_action_change
-            
-            print(f"\n--- GRADIENT STEP PREDICTION ---")
-            print(f"Learning rate: {lr_actor}")
-            print(f"Current action output: {current_action:.4f} N")
-            print(f"Gradient: {dldu_val:.6f}")
-            print(f"Predicted action change: {predicted_action_change:.6f} N")
-            print(f"Predicted new action: {predicted_new_action:.4f} N")
-            
-            # Sanity checks
-            if abs(predicted_new_action) > 9.0:
-                print(f"⚠️  WARNING: Actor will saturate at action limits!")
-            if abs(dldu_val) > 10.0:
-                print(f"⚠️  WARNING: Very large gradient - might cause instability!")
+
+        # Prepare debug variables (needed for _debug method)
+        current_action = actor_action_scaled.detach().squeeze().item()
+        lr_actor = self.actor_optimizer.param_groups[0]['lr']
+        dldu_val = dLdu.item() if dLdu.numel() == 1 else dLdu[0].item()
+        predicted_action_change = -lr_actor * dldu_val
+        predicted_new_action = current_action + predicted_action_change
 
         # 7️⃣ Apply manual gradient to actor
         self.actor.zero_grad()
         actor_action_scaled.backward(dLdu.unsqueeze(0))
-        
-        # Check actual gradients before clipping
-        if self.step % 10 == 0:
-            print(f"\n--- ACTUAL PARAMETER GRADIENTS (before clipping) ---")
-            for name, param in self.actor.named_parameters():
-                if param.grad is not None:
-                    print(f"{name}: grad_norm={param.grad.norm().item():.6f}, grad_mean={param.grad.mean().item():.6f}")
-        
+
         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
         self.actor_optimizer.step()
-        
+
+        new_action = self.actor(obs_torch).detach().squeeze().item()
+
+        # Call debug method (only prints when step % 10 == 0)
         if self.step % 10 == 0:
-            print(f"\n--- AFTER ACTOR UPDATE ---")
-            new_action = self.actor(obs_torch).detach().squeeze().item()  # ← Fixed
-            print(f"New actor output: {new_action:.4f} N (was {current_action:.4f} N)")
-            print(f"Actual change: {new_action - current_action:.6f} N")
-            print(f"{'='*80}\n")
+            self._debug(
+                step=self.step,
+                obs=obs,
+                action=action,
+                reward=reward,
+                next_obs=next_obs,
+                value_pred=value_pred,
+                target_value=target_value,
+                td_error=td_error,
+                critic_weight_before=critic_weight_before,
+                critic_weight_after=critic_weight_after,
+                actor_action_scaled=actor_action_scaled,
+                x_next_pred_np=x_next_pred_np,
+                dVdx=dVdx,
+                dVdx_G=dVdx_G,
+                dLdu=dLdu,
+                G_t=G_t,
+                current_action=current_action,
+                lr_actor=lr_actor,
+                dldu_val=dldu_val,
+                predicted_action_change=predicted_action_change,
+                predicted_new_action=predicted_new_action,
+                new_action=new_action
+            )
 
         # ------- Update memory -------
         self.prev_obs = obs_torch.detach()
