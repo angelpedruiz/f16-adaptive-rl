@@ -47,12 +47,9 @@ class Critic(nn.Module):
         prev_size = obs_dim
         for hidden_size in hidden_sizes:
             linear = nn.Linear(prev_size, hidden_size)
-            # Use Kaiming initialization for LeakyReLU with negative_slope=0.2
-            #nn.init.kaiming_uniform_(linear.weight, a=0.2, nonlinearity='leaky_relu')
             nn.init.kaiming_uniform_(linear.weight, nonlinearity='tanh')
             nn.init.zeros_(linear.bias)
             layers.append(linear)
-            #layers.append(nn.LeakyReLU(0.2))  # ← CHANGED FROM RELU
             layers.append(nn.Tanh())
             prev_size = hidden_size
 
@@ -323,6 +320,67 @@ class IHDPAgent():
             return 0.0
         return np.linalg.norm(np.concatenate(grad_list))
 
+    def _diagnose_critic_activations(self, obs: torch.Tensor) -> dict:
+        """
+        Diagnose critic network layer activations to detect saturation and gradient flow issues.
+
+        Returns dict with activation statistics for each layer.
+        """
+        stats = {}
+
+        # Forward pass through critic layers, tracking activations
+        x = obs
+        for i, layer in enumerate(self.critic.model):
+            x = layer(x)
+
+            # Get statistics for this layer
+            x_flat = x.detach().cpu().numpy().flatten()
+
+            layer_type = layer.__class__.__name__
+            stats[f'layer_{i}'] = {
+                'type': layer_type,
+                'mean': float(np.mean(x_flat)),
+                'std': float(np.std(x_flat)),
+                'min': float(np.min(x_flat)),
+                'max': float(np.max(x_flat)),
+            }
+
+            # For Tanh, check saturation (values near ±1)
+            if layer_type == 'Tanh':
+                saturation_count = np.sum(np.abs(x_flat) > 0.99)
+                saturation_pct = 100.0 * saturation_count / len(x_flat)
+                stats[f'layer_{i}']['saturation_pct'] = saturation_pct
+                stats[f'layer_{i}']['saturated'] = saturation_pct > 20  # Flag if >20% saturated
+
+        return stats
+
+    def _diagnose_critic_gradients(self, obs: torch.Tensor, target_value: torch.Tensor) -> dict:
+        """
+        Diagnose gradient flow through critic network layers.
+
+        Returns dict with gradient statistics for each parameter.
+        """
+        # Forward pass
+        value_pred = self.critic(obs)
+        loss = 0.5 * (target_value - value_pred).pow(2).mean()
+
+        # Backward pass
+        self.critic_optimizer.zero_grad()
+        loss.backward()
+
+        grad_stats = {}
+        for i, (name, param) in enumerate(self.critic.named_parameters()):
+            if param.grad is not None:
+                grad_np = param.grad.data.cpu().numpy()
+                grad_stats[name] = {
+                    'grad_norm': float(np.linalg.norm(grad_np)),
+                    'grad_mean': float(np.mean(np.abs(grad_np))),
+                    'grad_max': float(np.max(np.abs(grad_np))),
+                    'param_norm': float(np.linalg.norm(param.data.cpu().numpy())),
+                }
+
+        return grad_stats
+
     def update(self, obs: np.ndarray, action: np.ndarray, reward: float, terminated: bool, next_obs: np.ndarray) -> dict:
         """
         Update Actor, Critic, and Model networks based on a single transition tuple.
@@ -434,6 +492,30 @@ class IHDPAgent():
                 new_action=new_action
             )
 
+            # --- Run diagnostics ---
+            print("\n=== CRITIC ACTIVATION DIAGNOSTICS ===")
+            activation_stats = self._diagnose_critic_activations(obs_torch)
+            for layer_name, stats in activation_stats.items():
+                print(f"\n{layer_name} ({stats['type']}):")
+                print(f"  Output range: [{stats['min']:.4f}, {stats['max']:.4f}]")
+                print(f"  Mean: {stats['mean']:.4f}, Std: {stats['std']:.4f}")
+                if 'saturation_pct' in stats:
+                    sat_pct = stats['saturation_pct']
+                    print(f"  Tanh Saturation: {sat_pct:.1f}%", end="")
+                    if stats['saturated']:
+                        print(" ⚠️  HIGH SATURATION!")
+                    else:
+                        print()
+
+            print("\n=== CRITIC GRADIENT DIAGNOSTICS ===")
+            grad_stats = self._diagnose_critic_gradients(obs_torch, target_value)
+            for param_name, stats in grad_stats.items():
+                print(f"{param_name}:")
+                print(f"  Grad norm: {stats['grad_norm']:.8f}, Grad mean: {stats['grad_mean']:.8f}, Grad max: {stats['grad_max']:.8f}")
+                print(f"  Param norm: {stats['param_norm']:.6f}")
+                if stats['grad_norm'] < 1e-6:
+                    print("  ⚠️  VANISHING GRADIENT!")
+
         # ------- Update memory -------
         self.prev_obs = obs_torch.detach()
         self.prev_reward = reward_torch.detach()
@@ -485,4 +567,5 @@ class IHDPAgent():
             },
             'actor_weights': actor_weights_by_layer,
             'critic_weights': critic_weights_by_layer,
+            'dVdx': dVdx,
         }

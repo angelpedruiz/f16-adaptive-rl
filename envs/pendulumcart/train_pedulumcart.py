@@ -178,6 +178,7 @@ class PendulumCartTrainer():
             },
             'actor_weights_history': [],
             'critic_weights_history': [],
+            'dVdx_history': [],
         }
 
         # Initialize environment
@@ -221,6 +222,7 @@ class PendulumCartTrainer():
             # Store weight history from metrics
             training_data['actor_weights_history'].append(metrics['actor_weights'])
             training_data['critic_weights_history'].append(metrics['critic_weights'])
+            training_data['dVdx_history'].append(metrics['dVdx'])
 
             # Handle episode end
             if done:
@@ -262,7 +264,7 @@ if __name__ == "__main__":
 
     # ------- Parameters -------
     max_steps_per_episode = 300
-    training_max_steps = 100
+    training_max_steps = 50
     dt = 0.01
 
     forgetting_factor = 0.8

@@ -280,9 +280,16 @@ class PlottingManager:
                 - 'gradient_norms': Dict with 'actor', 'critic' keys
                 - 'actor_weights_history': List of dicts with 'layer_0', 'layer_1', etc. keys containing weight arrays at each timestep
                 - 'critic_weights_history': List of dicts with 'layer_0', 'layer_1', etc. keys containing weight arrays at each timestep
+                - 'dVdx_history': List of dVdx gradient arrays (state_dim,) showing critic gradient evolution
         """
         # Reuse HDP plotting method since metrics are similar
         self.plot_hdp_learning(training_data)
+
+        # Plot critic gradient evolution
+        if 'dVdx_history' in training_data and training_data['dVdx_history']:
+            state_labels = ['Cart Pos', 'Cart Vel', 'Angle', 'Angular Vel']  # For pendulum cart
+            self._plot_critic_gradient(training_data['dVdx_history'], state_labels=state_labels)
+            print(f"[*] Plotted critic gradient evolution{' (saved)' if self.save_dir else ''}")
 
         # Plot actor and critic weight evolution over time
         if 'actor_weights_history' in training_data and training_data['actor_weights_history']:
@@ -420,6 +427,48 @@ class PlottingManager:
         ax.plot(timesteps, prediction, 'r--', linewidth=2, label='Predicted', alpha=0.8)
 
         PlotTools.apply_common_styling(ax, 'Timestep', ylabel, title)
+        PlotTools.save_or_show(fig, self._get_save_path(filename))
+
+    def _plot_critic_gradient(self, dVdx_history: list[np.ndarray], state_labels: list[str] = None, filename: str = 'critic_gradient_evolution.png'):
+        """
+        Plot the evolution of critic gradient (dV/dx) over training time.
+
+        Each state dimension gets its own curve showing how its gradient changes.
+
+        Args:
+            dVdx_history: List of dVdx arrays over time, where each array is shape (state_dim,)
+            state_labels: Optional labels for state dimensions (e.g., ['cart_pos', 'cart_vel', 'angle', 'ang_vel'])
+            filename: Filename for saving the plot
+        """
+        if not dVdx_history or len(dVdx_history) == 0:
+            return
+
+        # Convert to numpy array for easier manipulation
+        dVdx_array = np.array(dVdx_history)  # Shape: (timesteps, state_dim)
+
+        state_dim = dVdx_array.shape[1]
+        timesteps = np.arange(len(dVdx_history))
+
+        # Default state labels if not provided
+        if state_labels is None:
+            state_labels = [f'State {i}' for i in range(state_dim)]
+
+        # Create figure with subplots
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        # Plot each state dimension's gradient evolution
+        colors = plt.cm.tab10(np.linspace(0, 1, min(state_dim, 10)))
+
+        for state_idx in range(state_dim):
+            color_idx = state_idx % len(colors)
+            ax.plot(timesteps, dVdx_array[:, state_idx],
+                   color=colors[color_idx], linewidth=2, alpha=0.8,
+                   label=state_labels[state_idx])
+
+        ax.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.3)
+        PlotTools.apply_common_styling(ax, 'Training Step', 'Gradient Value (∂V/∂x)',
+                                      'Critic Gradient Evolution Over Training')
+        plt.tight_layout()
         PlotTools.save_or_show(fig, self._get_save_path(filename))
 
     def _plot_network_weights(self, weights_history: list[dict[str, np.ndarray]], network_name: str, filename: str):
