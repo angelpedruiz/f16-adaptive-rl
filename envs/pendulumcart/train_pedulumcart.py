@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from pendulumcart import PendulumCartEnv
 from agents.HDP.hdp import HDPAgent
 from agents.IHDP.ihdp import IHDPAgent
+from agents.IHDP2.ihdp import IHDPAgent as IHDPAgent2
 from utils.plotting_manager import PlottingManager
 
 class PendulumCartTrainer():
@@ -245,10 +246,194 @@ class PendulumCartTrainer():
         print(f"G:\n{G}")
 
         return training_data
+
+    def train_ihdp2(self, agent, max_steps: int) -> dict:
+        """
+        Train an IHDP2 (Incremental Hierarchical Dynamic Programming 2) agent on the PendulumCart environment.
+
+        IHDP2 is an improved version of IHDP with simplified parameter configuration and metric tracking
+        optimized for visualization with PlottingManager.
+
+        Args:
+            agent: IHDPAgent2 instance to train
+            max_steps: Maximum number of training steps
+
+        Returns:
+            Dictionary containing training data for visualization
+        """
+
+        # Initialize training data storage
+        training_data = {
+            'states': [],
+            'actions': [],
+            'rewards': [],
+            'critic_errors': [],
+            'critic_predictions': [],
+            'critic_targets': [],
+            'model_errors': [],
+            'model_predictions': [],
+            'true_states': [],
+            'losses': {
+                'actor': [],
+                'critic': [],
+            },
+            'weight_norms': {
+                'actor': [],
+                'critic': [],
+            },
+            'gradient_norms': {
+                'actor': [],
+                'critic': [],
+            },
+        }
+
+        # Initialize environment
+        obs, _ = self.env.reset()
+
+        episode_count = 0
+        episode_reward = 0
+        episode_step = 0
+
+        for step in tqdm.tqdm(range(max_steps), desc="Training IHDP2 Agent", unit="step"):
+            # Get action from agent
+            action = agent.get_action(obs)
+
+            # Take step in environment
+            next_obs, reward, terminated, truncated, _ = self.env.step(action)
+            done = terminated or truncated
+
+            # Update agent and get metrics
+            metrics = agent.update(obs, action, reward, terminated, next_obs)
+
+            # Store data
+            training_data['states'].append(self.env.state.copy())
+            training_data['actions'].append(action)
+            training_data['rewards'].append(reward)
+            training_data['critic_errors'].append(metrics['critic_error'])
+            training_data['critic_predictions'].append(metrics['critic_prediction'])
+            training_data['critic_targets'].append(metrics['critic_target'])
+            training_data['model_errors'].append(metrics['model_error'])
+            training_data['model_predictions'].append(metrics['model_prediction'])
+            training_data['true_states'].append(metrics['true_state'])
+            training_data['losses']['actor'].append(metrics['losses']['actor_loss'])
+            training_data['losses']['critic'].append(metrics['losses']['critic_loss'])
+            training_data['weight_norms']['actor'].append(metrics['weights_norm']['actor'])
+            training_data['weight_norms']['critic'].append(metrics['weights_norm']['critic'])
+            training_data['gradient_norms']['actor'].append(metrics['gradients_norm']['actor'])
+            training_data['gradient_norms']['critic'].append(metrics['gradients_norm']['critic'])
+
+            # Handle episode end
+            episode_reward += reward
+            episode_step += 1
+
+            if done:
+                episode_count += 1
+                if step % 100 == 0 or episode_count < 5:
+                    print(f"Episode {episode_count}: {episode_step} steps, Reward: {episode_reward:.2f}")
+                obs, _ = self.env.reset()
+                episode_reward = 0
+                episode_step = 0
+            else:
+                obs = next_obs
+
+        print(f"Training complete! Total episodes: {episode_count}")
+
+        return training_data
+
+# if __name__ == "__main__":
+#     from datetime import datetime
     
+#     # seed
+#     seed = 42
+#     np.random.seed(seed)
+#     torch.manual_seed(seed)
+
+#     # ------- Parameters -------
+#     max_steps_per_episode = 300
+#     training_max_steps = 100
+#     dt = 0.01
+
+#     forgetting_factor = 0.8
+#     initial_covariance = 0.99
+#     gamma = 0.99
+#     lr_actor = 1e-1
+#     lr_critic = 1e-1
+#     lr_model = 5e-1
+#     actor_sizes = [6, 6]
+#     critic_sizes = [6, 6]
+#     model_sizes = [10, 10]
+
+#     # Create timestamped results directory with hierarchical structure
+#     # Structure: results/[env_name]/[agent_name]/[timestamp]/
+#     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+#     env_name = 'pendulumcart'
+#     agent_name = 'IHDP'
+
+#     # Create directory for IHDP agent
+#     save_dir = os.path.join('./results', env_name, agent_name, timestamp)
+#     os.makedirs(save_dir, exist_ok=True)
+#     print(f"Results will be saved to: {save_dir}\n")
+
+#     # ------- Initialize -------
+#     env = PendulumCartEnv(dt=dt, max_steps=max_steps_per_episode)
+#     trainer = PendulumCartTrainer(env)
+#     agentHDP = HDPAgent(
+#         obs_space=env.observation_space,
+#         act_space=env.action_space,
+#         gamma=gamma,
+#         hidden_sizes={'actor': actor_sizes, 'critic': critic_sizes, 'model': model_sizes},
+#         learning_rates={'actor': lr_actor, 'critic': lr_critic, 'model': lr_model}
+#     )
+#     agent_ihdp = IHDPAgent(
+#         obs_space=env.observation_space,
+#         act_space=env.action_space,
+#         gamma=gamma,
+#         forgetting_factor=0.99,
+#         initial_covariance=1.0,
+#         hidden_sizes={'actor': actor_sizes, 'critic': critic_sizes,},
+#         learning_rates={'actor': lr_actor, 'critic': lr_critic}
+#     )
+
+#     # ------- Train Agent -------
+#     print("Starting training...")
+#     training_data = trainer.train_ihdp(agent_ihdp, max_steps=training_max_steps)
+#     print("Training complete!")
+#     print("Plotting results...")
+
+#     # ------- Convert data to numpy arrays for plotting -------
+#     training_data['states'] = np.array(training_data['states'])
+#     training_data['actions'] = np.array(training_data['actions'])
+#     training_data['rewards'] = np.array(training_data['rewards'])
+
+#     # ------- Plotting -------
+#     plotting_manager = PlottingManager(env=env, agent=agent_ihdp, save_dir=save_dir)
+
+#     # Render animation of the episode
+#     plotting_manager.render_pendulumcart_env(
+#         states=training_data['states'],
+#         filename='pendulum_animation.gif',
+#         fps=30
+#     )
+
+#     # Plot trajectory
+#     plotting_manager.plot_pendulumcart_trajectory(
+#         states=training_data['states'],
+#         actions=training_data['actions'],
+#         rewards=training_data['rewards']
+#     )
+
+#     # Plot learning metrics
+#     plotting_manager.plot_ihdp_learning(training_data)
+
+#     # Save env and agent parameters
+#     plotting_manager.save_run_params(seed=seed) # last snapshot
+
+#     print("\nAll plots and animations generated successfully!")
+#     print(f"Results saved to: {save_dir}")
+
 if __name__ == "__main__":
     from datetime import datetime
-    
+
     # seed
     seed = 42
     np.random.seed(seed)
@@ -256,26 +441,29 @@ if __name__ == "__main__":
 
     # ------- Parameters -------
     max_steps_per_episode = 300
-    training_max_steps = 100
+    training_max_steps = 50
     dt = 0.01
 
-    forgetting_factor = 0.8
-    initial_covariance = 0.99
+    # IHDP2 parameters
     gamma = 0.99
-    lr_actor = 1e-1
-    lr_critic = 1e-1
-    lr_model = 5e-1
-    actor_sizes = [6, 6]
-    critic_sizes = [6, 6]
-    model_sizes = [10, 10]
+    actor_hidden = [64, 64]
+    critic_hidden = [64, 64]
+    learning_rate = 1e-3
+    actor_lr_decay = 0.995
+    actor_lr_min = 1e-5
+    critic_learning_rate = 1e-1
+    critic_lr_decay = 1.0
+    critic_lr_min = 1e-6
+    exploration_noise_scale = 0.1
+    model_window_size = None
 
     # Create timestamped results directory with hierarchical structure
     # Structure: results/[env_name]/[agent_name]/[timestamp]/
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     env_name = 'pendulumcart'
-    agent_name = 'IHDP'
+    agent_name = 'IHDP2'
 
-    # Create directory for IHDP agent
+    # Create directory for IHDP2 agent
     save_dir = os.path.join('./results', env_name, agent_name, timestamp)
     os.makedirs(save_dir, exist_ok=True)
     print(f"Results will be saved to: {save_dir}\n")
@@ -283,26 +471,31 @@ if __name__ == "__main__":
     # ------- Initialize -------
     env = PendulumCartEnv(dt=dt, max_steps=max_steps_per_episode)
     trainer = PendulumCartTrainer(env)
-    agentHDP = HDPAgent(
+
+    # Create parameters dict for IHDP2
+    parameters = {
+        'gamma': gamma,
+        'actor_hidden': actor_hidden,
+        'critic_hidden': critic_hidden,
+        'learning_rate': learning_rate,
+        'actor_lr_decay': actor_lr_decay,
+        'actor_lr_min': actor_lr_min,
+        'critic_learning_rate': critic_learning_rate,
+        'critic_lr_decay': critic_lr_decay,
+        'critic_lr_min': critic_lr_min,
+        'exploration_noise_scale': exploration_noise_scale,
+        'model_window_size': model_window_size,
+    }
+
+    agent_ihdp2 = IHDPAgent2(
         obs_space=env.observation_space,
         act_space=env.action_space,
-        gamma=gamma,
-        hidden_sizes={'actor': actor_sizes, 'critic': critic_sizes, 'model': model_sizes},
-        learning_rates={'actor': lr_actor, 'critic': lr_critic, 'model': lr_model}
-    )
-    agent_ihdp = IHDPAgent(
-        obs_space=env.observation_space,
-        act_space=env.action_space,
-        gamma=gamma,
-        forgetting_factor=0.99,
-        initial_covariance=1.0,
-        hidden_sizes={'actor': actor_sizes, 'critic': critic_sizes,},
-        learning_rates={'actor': lr_actor, 'critic': lr_critic}
+        parameters=parameters
     )
 
     # ------- Train Agent -------
     print("Starting training...")
-    training_data = trainer.train_ihdp(agent_ihdp, max_steps=training_max_steps)
+    training_data = trainer.train_ihdp2(agent_ihdp2, max_steps=training_max_steps)
     print("Training complete!")
     print("Plotting results...")
 
@@ -312,7 +505,7 @@ if __name__ == "__main__":
     training_data['rewards'] = np.array(training_data['rewards'])
 
     # ------- Plotting -------
-    plotting_manager = PlottingManager(env=env, agent=agent_ihdp, save_dir=save_dir)
+    plotting_manager = PlottingManager(env=env, agent=agent_ihdp2, save_dir=save_dir)
 
     # Render animation of the episode
     plotting_manager.render_pendulumcart_env(
@@ -336,9 +529,5 @@ if __name__ == "__main__":
 
     print("\nAll plots and animations generated successfully!")
     print(f"Results saved to: {save_dir}")
-    
-    
-    
-    
-    
+
     
