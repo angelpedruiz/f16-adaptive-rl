@@ -8,10 +8,14 @@ import gymnasium as gym
 
 
 
+import torch
+import torch.nn as nn
+
 class Actor(nn.Module):
     ''' Actor Network for HDP outputs [-1,1] '''
-    def __init__(self, obs_dim: int, act_dim: int, hidden_sizes: list):
+    def __init__(self, obs_dim: int, act_dim: int, hidden_sizes: list, last_layer_clip: float = 3e-3):
         super().__init__()
+        self.last_layer_clip = last_layer_clip
         
         layers = []
         prev_size = obs_dim
@@ -19,24 +23,44 @@ class Actor(nn.Module):
         # Hidden layers
         for hidden_size in hidden_sizes:
             linear = nn.Linear(prev_size, hidden_size)
-            # Smaller initialization for stability
-            nn.init.normal_(linear.weight, mean=0.0, std=0.01)
+            nn.init.uniform_(linear.weight, -last_layer_clip, last_layer_clip)
             nn.init.zeros_(linear.bias)
-            layers.append(linear) 
+            layers.append(linear)
             layers.append(nn.Tanh())
             prev_size = hidden_size
 
-        # Output layer with small uniform initialization
-        output_layer = nn.Linear(prev_size, act_dim)
-        nn.init.uniform_(output_layer.weight, -3e-3, 3e-3)
-        nn.init.zeros_(output_layer.bias)  # Zero bias initialization
-        layers.append(output_layer)
+        # Output layer
+        self.output_layer = nn.Linear(prev_size, act_dim)
+        nn.init.uniform_(self.output_layer.weight, -last_layer_clip, last_layer_clip)
+        nn.init.zeros_(self.output_layer.bias)
+        
+        layers.append(self.output_layer)
         layers.append(nn.Tanh())  # output in [-1,1]
 
         self.model = nn.Sequential(*layers)
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         return self.model(obs)
+
+    def clip_weights(self, clip_value: float = None):
+        """
+        Clip ALL Linear layer weights and biases uniformly to enforce weight limits.
+
+        This prevents saturation in Tanh activations and improves gradient flow.
+        All layers (hidden and output) are clipped to the same bounds.
+
+        Args:
+            clip_value: Clipping value for all weights. If None, uses self.last_layer_clip
+        """
+        if clip_value is None:
+            clip_value = self.last_layer_clip
+
+        with torch.no_grad():
+            for module in self.model:
+                if isinstance(module, nn.Linear):
+                    module.weight.clamp_(-clip_value, clip_value)
+                    module.bias.clamp_(-clip_value, clip_value)
+
 
     
 class Critic(nn.Module):
@@ -65,6 +89,12 @@ class Critic(nn.Module):
         return self.model(obs)
     
     def clip_pre_tanh_weights(self, clip_value=1.0):
+        """
+        Clip weights of Linear layers that feed into Tanh activations (all hidden layers).
+
+        This prevents saturation in Tanh activations and helps gradient flow.
+        Unlike the actor, the critic clips all pre-tanh weights across all hidden layers.
+        """
         modules = list(self.model.children())
         for i, layer in enumerate(modules[:-1]):  # skip last layer
             if isinstance(layer, nn.Linear) and isinstance(modules[i + 1], nn.Tanh):
@@ -103,6 +133,7 @@ class RLSModel():
         self.obs_dim = obs_dim
         self.act_dim = act_dim
         self.forgetting_factor = forgetting_factor
+        self.initial_covariance = delta  # Store the initial value for reproducibility
 
         # Parameter matrix Θ: shape (obs_dim, obs_dim + act_dim)
         # Structure: [F | G] where:
@@ -181,7 +212,7 @@ class RLSModel():
         return next_x
 
 class IHDPAgent():
-    def __init__(self, obs_space: gym.Space, act_space: gym.Space, gamma: float, forgetting_factor: float, initial_covariance: float, hidden_sizes: dict[str, list[int]], learning_rates: dict[str, float], weight_limit: float = 30.0):
+    def __init__(self, obs_space: gym.Space, act_space: gym.Space, gamma: float, forgetting_factor: float, initial_covariance: float, hidden_sizes: dict[str, list[int]], learning_rates: dict[str, float], critic_weight_limit: float = 30.0, actor_weight_limit: float = 3e-3):
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -191,11 +222,12 @@ class IHDPAgent():
         
         # Hyperparameters
         self.gamma = gamma
-        self.weight_limit = weight_limit
+        self.actor_weight_limit = actor_weight_limit
+        self.critic_weight_limit = critic_weight_limit
 
         # Initialize Actor, Critic, and Model networks
-        self.actor = Actor(self.obs_dim, self.act_dim, hidden_sizes['actor'])
-        self.critic = Critic(self.obs_dim, hidden_sizes['critic'])
+        self.actor = Actor(self.obs_dim, self.act_dim, hidden_sizes['actor'], last_layer_clip=actor_weight_limit)
+        self.critic = Critic(self.obs_dim, hidden_sizes['critic'], )
 
         self.model = RLSModel(self.obs_dim, self.act_dim, forgetting_factor=forgetting_factor, delta=initial_covariance)
 
@@ -283,7 +315,7 @@ class IHDPAgent():
         dldu_val_actual = dLdu.item() if dLdu.numel() == 1 else dLdu[0].item()
         print(f"  Interpretation: If action increases by 1N, V changes by {dvdu_val:.6f}")
         print(f"dL/du = -{dvdu_val:.6f} = {dldu_val_actual:.6f}")
-        print(f"  Interpretation: Gradient says action should {'INCREASE' if dldu_val_actual > 0 else 'DECREASE'}")
+        print(f"  Interpretation: Gradient descent will {'DECREASE' if dldu_val_actual > 0 else 'INCREASE'} action to maximize V")
         print(f"||dL/du|| = {torch.norm(dLdu).item():.6f}")
 
         # Gradient step prediction
@@ -314,6 +346,25 @@ class IHDPAgent():
                 
 
 
+    def get_params(self) -> dict:
+        """Return agent parameters for reproducibility."""
+        params = {
+            'gamma': self.gamma,
+            'actor_weight_limit': self.actor_weight_limit,
+            'critic_weight_limit': self.critic_weight_limit,
+            'actor_hidden_sizes': [layer.out_features for layer in self.actor.model if isinstance(layer, nn.Linear)][:-1],
+            'critic_hidden_sizes': [layer.out_features for layer in self.critic.model if isinstance(layer, nn.Linear)][:-1],
+            'learning_rates': {
+                'actor': self.actor_optimizer.param_groups[0]['lr'],
+                'critic': self.critic_optimizer.param_groups[0]['lr']
+            },
+            'model_params': {
+                'forgetting_factor': self.model.forgetting_factor,
+                'initial_covariance': self.model.initial_covariance
+            }
+        }
+        return params
+
     def get_action(self, obs: np.ndarray) -> np.ndarray:
         """Get action from actor network - [-1,1]"""
         obs = torch.FloatTensor(obs).unsqueeze(0)
@@ -328,6 +379,40 @@ class IHDPAgent():
         if not grad_list:
             return 0.0
         return np.linalg.norm(np.concatenate(grad_list))
+
+    def _diagnose_actor_activations(self, obs: torch.Tensor) -> dict:
+        """
+        Diagnose actor network layer activations to detect saturation and gradient flow issues.
+
+        Returns dict with activation statistics for each layer.
+        """
+        stats = {}
+
+        # Forward pass through actor layers, tracking activations
+        x = obs
+        for i, layer in enumerate(self.actor.model):
+            x = layer(x)
+
+            # Get statistics for this layer
+            x_flat = x.detach().cpu().numpy().flatten()
+
+            layer_type = layer.__class__.__name__
+            stats[f'layer_{i}'] = {
+                'type': layer_type,
+                'mean': float(np.mean(x_flat)),
+                'std': float(np.std(x_flat)),
+                'min': float(np.min(x_flat)),
+                'max': float(np.max(x_flat)),
+            }
+
+            # For Tanh, check saturation (values near ±1)
+            if layer_type == 'Tanh':
+                saturation_count = np.sum(np.abs(x_flat) > 0.99)
+                saturation_pct = 100.0 * saturation_count / len(x_flat)
+                stats[f'layer_{i}']['saturation_pct'] = saturation_pct
+                stats[f'layer_{i}']['saturated'] = saturation_pct > 20  # Flag if >20% saturated
+
+        return stats
 
     def _diagnose_critic_activations(self, obs: torch.Tensor) -> dict:
         """
@@ -467,7 +552,7 @@ class IHDPAgent():
         critic_weight_before = list(self.critic.parameters())[0].data.clone()
 
         with torch.no_grad():
-            target_value = reward_torch + self.gamma * self.critic(next_obs_torch)
+            target_value = reward_torch + self.gamma * self.critic(next_obs_torch) * (1 - int(terminated))
 
         value_pred = self.critic(obs_torch)
         td_error = target_value - value_pred
@@ -477,7 +562,7 @@ class IHDPAgent():
         critic_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=1.0)
         self.critic_optimizer.step()
-        self.critic.clip_pre_tanh_weights(clip_value=self.weight_limit)
+        self.critic.clip_pre_tanh_weights(clip_value=self.critic_weight_limit)
 
         critic_weight_after = list(self.critic.parameters())[0].data
 
@@ -522,6 +607,7 @@ class IHDPAgent():
 
         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
         self.actor_optimizer.step()
+        self.actor.clip_weights(clip_value=self.actor_weight_limit)  # Clip all actor weights uniformly
 
         new_action = self.actor(obs_torch).detach().squeeze().item()
 
@@ -553,6 +639,20 @@ class IHDPAgent():
             )
 
             # --- Run diagnostics ---
+            print("\n=== ACTOR ACTIVATION DIAGNOSTICS ===")
+            actor_activation_stats = self._diagnose_actor_activations(obs_torch)
+            for layer_name, stats in actor_activation_stats.items():
+                print(f"\n{layer_name} ({stats['type']}):")
+                print(f"  Output range: [{stats['min']:.4f}, {stats['max']:.4f}]")
+                print(f"  Mean: {stats['mean']:.4f}, Std: {stats['std']:.4f}")
+                if 'saturation_pct' in stats:
+                    sat_pct = stats['saturation_pct']
+                    print(f"  Tanh Saturation: {sat_pct:.1f}%", end="")
+                    if stats['saturated']:
+                        print(" ⚠️  HIGH SATURATION!")
+                    else:
+                        print()
+
             print("\n=== CRITIC ACTIVATION DIAGNOSTICS ===")
             activation_stats = self._diagnose_critic_activations(obs_torch)
             for layer_name, stats in activation_stats.items():
@@ -607,14 +707,19 @@ class IHDPAgent():
         actor_grads = [p.grad.data.cpu().numpy().flatten() for p in self.actor.parameters() if p.grad is not None]
         critic_grads = [p.grad.data.cpu().numpy().flatten() for p in self.critic.parameters() if p.grad is not None]
 
-        # Collect separate weights for each layer (use .copy() to ensure independent snapshots)
+        # Collect weights AND biases from Linear layers (weight first, then bias for each layer)
         actor_weights_by_layer = {}
-        for i, param in enumerate(self.actor.parameters()):
-            actor_weights_by_layer[f'layer_{i}'] = param.data.cpu().numpy().copy()
+        for i, module in enumerate(self.actor.model):
+            if isinstance(module, nn.Linear):
+                actor_weights_by_layer[f'layer_{i}_weight'] = module.weight.data.cpu().numpy().copy()
+                actor_weights_by_layer[f'layer_{i}_bias'] = module.bias.data.cpu().numpy().copy()
 
         critic_weights_by_layer = {}
-        for i, param in enumerate(self.critic.parameters()):
-            critic_weights_by_layer[f'layer_{i}'] = param.data.cpu().numpy().copy()
+        for i, module in enumerate(self.critic.model):
+            if isinstance(module, nn.Linear):
+                critic_weights_by_layer[f'layer_{i}_weight'] = module.weight.data.cpu().numpy().copy()
+                critic_weights_by_layer[f'layer_{i}_bias'] = module.bias.data.cpu().numpy().copy()
+                
 
         self.step += 1
 

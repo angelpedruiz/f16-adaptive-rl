@@ -193,7 +193,7 @@ class PendulumCartTrainer():
             if step % 10 == 0:
                 print(f"Step {step}/{max_steps}")
             # Get action from agent
-            action = agent.get_action(obs)
+            action = agent.get_action(obs) # [-1,1]
 
             # Take step in environment
             next_obs, reward, terminated, truncated, info = self.env.step(action)
@@ -264,19 +264,20 @@ if __name__ == "__main__":
 
     # ------- Parameters -------
     max_steps_per_episode = 300
-    training_max_steps = 500
+    training_max_steps = 2000
     dt = 0.01
 
     forgetting_factor = 0.8
     initial_covariance = 0.99
-    gamma = 0.99
-    lr_actor = 1e-1
-    lr_critic = 1e-1
+    gamma = 0.0
+    lr_actor = 0.5
+    lr_critic = 1e-2
     lr_model = 5e-1
     actor_sizes = [6, 6]
     critic_sizes = [6, 6]
     model_sizes = [10, 10]
-    weight_limit = 0.5
+    actor_weight_limit = 0.2
+    critic_weight_limit = 0.1
 
     # Create timestamped results directory with hierarchical structure
     # Structure: results/[env_name]/[agent_name]/[timestamp]/
@@ -303,11 +304,12 @@ if __name__ == "__main__":
         obs_space=env.observation_space,
         act_space=env.action_space,
         gamma=gamma,
-        forgetting_factor=0.99,
-        initial_covariance=1.0,
-        hidden_sizes={'actor': actor_sizes, 'critic': critic_sizes,},
-        learning_rates={'actor': lr_actor, 'critic': lr_critic}, 
-        weight_limit=weight_limit
+        forgetting_factor=forgetting_factor,
+        initial_covariance=initial_covariance,
+        hidden_sizes={'actor': actor_sizes, 'critic': critic_sizes},
+        learning_rates={'actor': lr_actor, 'critic': lr_critic},
+        actor_weight_limit=actor_weight_limit,
+        critic_weight_limit=critic_weight_limit
     )
 
     # ------- Train Agent -------
@@ -324,11 +326,11 @@ if __name__ == "__main__":
     # ------- Plotting -------
     plotting_manager = PlottingManager(env=env, agent=agent_ihdp, save_dir=save_dir)
 
-    # Render animation of the episode
+    # Render animation of the episode (adjustable playback speed)
     plotting_manager.render_pendulumcart_env(
         states=training_data['states'],
         filename='pendulum_animation.gif',
-        fps=30
+        speed=1.0  # 1.0 = real-time, 0.5 = slower, 2.0 = faster
     )
 
     # Plot trajectory

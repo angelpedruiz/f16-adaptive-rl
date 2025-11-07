@@ -99,20 +99,25 @@ class PlottingManager:
         plt.tight_layout()
         PlotTools.save_or_show(fig, self._get_save_path(filename))
     
-    def render_pendulumcart_env(self, states: np.ndarray, filename: str = 'animation.gif', fps: int = 30):
+    def render_pendulumcart_env(self, states: np.ndarray, filename: str = 'animation.gif', speed: float = 1.0):
         """
-        Render the pendulum cart environment as an animation.
+        Render the pendulum cart environment as an animation with adjustable playback speed.
 
         Args:
             states: Array of states [x, x_dot, theta, theta_dot] over time
             filename: Filename for animation (e.g., 'animation.gif' or 'animation.mp4')
-            fps: Frames per second for rendering
+            speed: Playback speed multiplier. 1.0 = real-time, 0.5 = half speed (slower), 2.0 = 2x speed (faster)
         """
         from matplotlib.animation import FuncAnimation
         from matplotlib.patches import Rectangle, Circle
 
         dt = self.env.dt if hasattr(self.env, 'dt') else 0.02
         pendulum_length = self.env.l if hasattr(self.env, 'l') else 0.5
+
+        # Plot all frames
+        states_to_plot = states
+        interval = int((dt * 1000) / speed)  # Convert to milliseconds, adjusted for speed
+        fps = int((1.0 / dt) * speed)  # Calculate fps based on speed
 
         # Create figure and axis
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -121,7 +126,7 @@ class PlottingManager:
         ax.set_aspect('equal')
         ax.set_xlabel('Position (m)')
         ax.set_ylabel('Height (m)')
-        ax.set_title('Inverted Pendulum on Cart', fontsize=14, fontweight='bold')
+        ax.set_title(f'Inverted Pendulum on Cart (speed={speed:.1f}x)', fontsize=14, fontweight='bold')
         ax.grid(True, alpha=0.3)
 
         # Draw track
@@ -156,10 +161,10 @@ class PlottingManager:
 
         def animate(frame):
             """Update animation frame."""
-            if frame >= len(states):
+            if frame >= len(states_to_plot):
                 return cart, pendulum_line, bob, info_text
 
-            x, _, theta, _ = states[frame]
+            x, _, theta, _ = states_to_plot[frame]
 
             # Update cart position
             cart.set_xy((x - cart_width/2, -0.5))
@@ -170,15 +175,14 @@ class PlottingManager:
             pendulum_line.set_data([x, pend_x], [-0.5 + cart_height, pend_y])
             bob.set_center((pend_x, pend_y))
 
-            # Update info text
+            # Update info text (show current step)
             info_text.set_text(f'x = {x:.3f} m\nθ = {theta:.3f} rad ({np.degrees(theta):.1f}°)\nStep = {frame}')
 
             return cart, pendulum_line, bob, info_text
 
-        # Create animation
-        interval = int(dt * 1000)  # Convert dt to milliseconds
+        # Create animation with adjusted speed
         anim = FuncAnimation(fig, animate, init_func=init,
-                            frames=len(states), interval=interval,
+                            frames=len(states_to_plot), interval=interval,
                             blit=True, repeat=True)
 
         save_path = self._get_save_path(filename)
@@ -189,7 +193,7 @@ class PlottingManager:
             else:
                 anim.save(save_path, writer='ffmpeg', fps=fps)
             plt.close(fig)
-            print(f"Animation saved to: {save_path}")
+            print(f"Animation saved to: {save_path} (speed={speed:.1f}x, fps={fps})")
         else:
             plt.show()
 
