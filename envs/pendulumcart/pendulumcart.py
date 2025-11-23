@@ -50,7 +50,7 @@ class PendulumCartEnv(gym.Env):
         super().__init__()
 
         # Physical parameters
-        self.M = 1.0       # cart mass [kg]
+        self.M = 1.0 * 0.5       # cart mass [kg]
         self.m = 0.1          # pendulum mass [kg]
         self.l = 0.5*2          # pendulum length [m]
         self.g = 10         # gravity [m/s²]
@@ -60,8 +60,8 @@ class PendulumCartEnv(gym.Env):
         self.max_steps = max_steps
         
         # Limits
-        self.x_max = 10      # max cart position [m]
-        self.theta_max = np.pi/2  # max angle from upright [rad] (~11.5 degrees)
+        self.x_max = 5      # max cart position [m]
+        self.theta_max = np.pi/4  # max angle from upright [rad] (~11.5 degrees)
         self.max_force = 10.0 # maximum force [N]
 
         # Linearized state-space model (around upright equilibrium)

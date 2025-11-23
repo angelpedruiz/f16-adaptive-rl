@@ -5,6 +5,7 @@ import gymnasium as gym
 import numpy as np
 import matplotlib.pyplot as plt
 import json
+from tqdm import tqdm
 
 class PlottingManager:
     def __init__(self, env: gym.Env, agent, save_dir: str = None):
@@ -99,14 +100,15 @@ class PlottingManager:
         plt.tight_layout()
         PlotTools.save_or_show(fig, self._get_save_path(filename))
     
-    def render_pendulumcart_env(self, states: np.ndarray, filename: str = 'animation.gif', speed: float = 1.0):
+    def render_pendulumcart_env(self, states: np.ndarray, filename: str = 'animation.gif', speed: float = 1.0, skip_frames: int = 1):
         """
-        Render the pendulum cart environment as an animation with adjustable playback speed.
+        Render the pendulum cart environment as an animation with adjustable playback speed and frame skipping.
 
         Args:
             states: Array of states [x, x_dot, theta, theta_dot] over time
             filename: Filename for animation (e.g., 'animation.gif' or 'animation.mp4')
             speed: Playback speed multiplier. 1.0 = real-time, 0.5 = half speed (slower), 2.0 = 2x speed (faster)
+            skip_frames: Plot every N frames. 1 = every frame, 10 = every 10th frame (smaller file, faster plotting)
         """
         from matplotlib.animation import FuncAnimation
         from matplotlib.patches import Rectangle, Circle
@@ -114,10 +116,10 @@ class PlottingManager:
         dt = self.env.dt if hasattr(self.env, 'dt') else 0.02
         pendulum_length = self.env.l if hasattr(self.env, 'l') else 0.5
 
-        # Plot all frames
-        states_to_plot = states
-        interval = int((dt * 1000) / speed)  # Convert to milliseconds, adjusted for speed
-        fps = int((1.0 / dt) * speed)  # Calculate fps based on speed
+        # Skip frames for faster plotting/smaller file
+        states_to_plot = states[::skip_frames]
+        interval = int((dt * skip_frames * 1000) / speed)  # Adjust interval for both skip_frames and speed
+        fps = int((1.0 / (dt * skip_frames)) * speed)  # Calculate fps based on skip_frames and speed
 
         # Create figure and axis
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -126,7 +128,7 @@ class PlottingManager:
         ax.set_aspect('equal')
         ax.set_xlabel('Position (m)')
         ax.set_ylabel('Height (m)')
-        ax.set_title(f'Inverted Pendulum on Cart (speed={speed:.1f}x)', fontsize=14, fontweight='bold')
+        ax.set_title(f'Inverted Pendulum on Cart (speed={speed:.1f}x, skip_frames={skip_frames})', fontsize=14, fontweight='bold')
         ax.grid(True, alpha=0.3)
 
         # Draw track
@@ -175,8 +177,9 @@ class PlottingManager:
             pendulum_line.set_data([x, pend_x], [-0.5 + cart_height, pend_y])
             bob.set_center((pend_x, pend_y))
 
-            # Update info text (show current step)
-            info_text.set_text(f'x = {x:.3f} m\nθ = {theta:.3f} rad ({np.degrees(theta):.1f}°)\nStep = {frame}')
+            # Update info text (show actual step in original array, accounting for skip_frames)
+            actual_step = frame * skip_frames
+            info_text.set_text(f'x = {x:.3f} m\nθ = {theta:.3f} rad ({np.degrees(theta):.1f}°)\nStep = {actual_step}')
 
             return cart, pendulum_line, bob, info_text
 
@@ -187,17 +190,92 @@ class PlottingManager:
 
         save_path = self._get_save_path(filename)
         if save_path:
-            # Save animation
-            if save_path.endswith('.gif'):
-                anim.save(save_path, writer='pillow', fps=fps)
-            else:
-                anim.save(save_path, writer='ffmpeg', fps=fps)
+            # Save animation with progress bar
+            print(f"Rendering animation: {filename} ({len(states_to_plot)} frames, speed={speed:.1f}x, skip_frames={skip_frames})")
+            with tqdm(total=len(states_to_plot), desc="Animation", unit="frame") as pbar:
+                def progress_callback(current_frame, total_frames):
+                    pbar.update(1)
+
+                if save_path.endswith('.gif'):
+                    anim.save(save_path, writer='pillow', fps=fps, progress_callback=progress_callback)
+                else:
+                    anim.save(save_path, writer='ffmpeg', fps=fps, progress_callback=progress_callback)
+
             plt.close(fig)
-            print(f"Animation saved to: {save_path} (speed={speed:.1f}x, fps={fps})")
+            print(f"Animation saved to: {save_path} (speed={speed:.1f}x, skip_frames={skip_frames}, fps={fps})")
         else:
             plt.show()
 
         return anim
+    
+    def plot_shortperiod_trajectory(self, states: np.ndarray, actions: np.ndarray, alpha_refs: np.ndarray, filename: str = 'shortperiod_trajectory.png'):
+        """
+        Plot trajectory for short-period pitch dynamics environment.
+        States: [alpha, q] where alpha is angle of attack (rad) and q is pitch rate (rad/s)
+        Actions: [delta_e] elevator deflection (deg)
+        Alpha_refs: Reference angle of attack signal (rad)
+
+        Args:
+            states: State trajectory array of shape (timesteps, 2)
+            actions: Action trajectory array of shape (timesteps, 1)
+            alpha_refs: Reference signal trajectory array of shape (timesteps,)
+            filename: Filename for saving (used only if save_dir was set in constructor)
+        """
+        dt = self.env.dt if hasattr(self.env, 'dt') else 0.01
+        timesteps = np.arange(len(states))
+        time = timesteps * dt
+
+        # Subplot layout: 2 states + 1 action + 1 tracking error + 1 reference tracking = 5 plots
+        fig, axes = plt.subplots(3, 2, figsize=(14, 10))
+        fig.suptitle('Short-Period Pitch Dynamics Trajectory', fontsize=16, fontweight='bold')
+
+        # State labels
+        state_labels = ['Angle of Attack α [rad]', 'Pitch Rate q [rad/s]']
+
+        # Plot states
+        for i in range(2):
+            row, col = i // 2, i % 2
+            ax = axes[row, col]
+            ax.plot(time, states[:, i], 'b-', linewidth=2, label='State')
+
+            # Add reference line for alpha at 0 (trim condition)
+            if i == 0:  # alpha
+                ax.axhline(y=0, color='gray', linestyle='--', alpha=0.5, label='Trim')
+                PlotTools.apply_common_styling(ax, 'Time [s]', state_labels[i], state_labels[i],
+                                              show_legend=True)
+            else:
+                PlotTools.apply_common_styling(ax, 'Time [s]', state_labels[i], state_labels[i],
+                                              show_legend=False)
+
+        # Plot action (elevator deflection)
+        ax = axes[1, 0]
+        ax.plot(time[:len(actions)], actions[:, 0], 'g-', linewidth=2)
+        PlotTools.apply_common_styling(ax, 'Time [s]', 'Elevator Deflection [deg]', 'Control Input', show_legend=False)
+
+        # Plot alpha tracking (angle of attack vs reference)
+        ax = axes[1, 1]
+        ax.plot(time, states[:, 0], 'b-', linewidth=2, label='α (Actual)', alpha=0.8)
+        ax.plot(time[:len(alpha_refs)], alpha_refs, 'r--', linewidth=2, label='α_ref (Reference)', alpha=0.8)
+        ax.axhline(y=0, color='gray', linestyle=':', linewidth=1, alpha=0.3)
+        PlotTools.apply_common_styling(ax, 'Time [s]', 'Angle [rad]', 'Angle of Attack Tracking')
+
+        # Plot tracking error
+        ax = axes[2, 0]
+        tracking_error = alpha_refs - states[:, 0]
+        ax.plot(time, tracking_error, 'orange', linewidth=2)
+        ax.axhline(y=0, color='black', linestyle='-', linewidth=1, alpha=0.5)
+        ax.fill_between(time, 0, tracking_error, alpha=0.3, color='orange')
+        PlotTools.apply_common_styling(ax, 'Time [s]', 'Error [rad]', 'Tracking Error (α_ref - α)', show_legend=False)
+
+        # Plot cumulative squared error
+        ax = axes[2, 1]
+        cumsum_sq_error = np.cumsum(tracking_error**2)
+        ax.plot(time, cumsum_sq_error, 'purple', linewidth=2)
+        PlotTools.apply_common_styling(ax, 'Time [s]', 'Cumulative Error', 'Cumulative Squared Tracking Error', show_legend=False)
+
+        plt.tight_layout()
+        PlotTools.save_or_show(fig, self._get_save_path(filename))
+
     
     def plot_hdp_learning(self, training_data: dict):
         """
@@ -266,7 +344,7 @@ class PlottingManager:
             print(f"All plots saved to: {self.save_dir}")
         print('='*50)
         
-    def plot_ihdp_learning(self, training_data: dict):
+    def plot_ihdp_learning(self, training_data: dict, skip_critic_vs_angle: bool = False):
         """
         Plot comprehensive iHDP learning metrics using all internal plotting methods.
 
@@ -285,14 +363,25 @@ class PlottingManager:
                 - 'actor_weights_history': List of dicts with 'layer_0', 'layer_1', etc. keys containing weight arrays at each timestep
                 - 'critic_weights_history': List of dicts with 'layer_0', 'layer_1', etc. keys containing weight arrays at each timestep
                 - 'dVdx_history': List of dVdx gradient arrays (state_dim,) showing critic gradient evolution
+            skip_critic_vs_angle: If True, skip plotting critic vs angle signal (useful for non-pendulum environments)
         """
         # Reuse HDP plotting method since metrics are similar
         self.plot_hdp_learning(training_data)
 
         # Plot critic gradient evolution
         if 'dVdx_history' in training_data and training_data['dVdx_history']:
-            state_labels = ['Cart Pos', 'Cart Vel', 'Angle', 'Angular Vel']  # For pendulum cart
-            self._plot_critic_gradient(training_data['dVdx_history'], state_labels=state_labels)
+            # Set observation labels based on environment type
+            env_class_name = self.env.__class__.__name__
+            if 'PendulumCart' in env_class_name:
+                obs_labels = ['Cart Pos', 'Cart Vel', 'Angle', 'Angular Vel']
+            elif 'ShortPeriod' in env_class_name:
+                obs_labels = ['α (Angle of Attack)', 'q (Pitch Rate)', 'α_ref (Reference)']
+            else:
+                # Default: generate generic labels based on observation dimension
+                obs_dim = len(training_data['dVdx_history'][0]) if training_data['dVdx_history'] else 0
+                obs_labels = [f'Obs {i}' for i in range(obs_dim)]
+
+            self._plot_critic_gradient(training_data['dVdx_history'], state_labels=obs_labels)
             print(f"[*] Plotted critic gradient evolution{' (saved)' if self.save_dir else ''}")
 
         # Plot actor and critic weight evolution over time
@@ -303,6 +392,27 @@ class PlottingManager:
         if 'critic_weights_history' in training_data and training_data['critic_weights_history']:
             self._plot_network_weights(training_data['critic_weights_history'], 'Critic', 'critic_weights_evolution.png')
             print(f"[*] Plotted critic weight evolution{' (saved)' if self.save_dir else ''}")
+
+        # Plot critic predictions vs targets vs angle signal (skip for some environments like shortperiod)
+        if not skip_critic_vs_angle:
+            has_predictions = 'critic_predictions' in training_data and len(training_data['critic_predictions']) > 0
+            has_targets = 'critic_targets' in training_data and len(training_data['critic_targets']) > 0
+            has_angles_key = 'neg_abs_angles' in training_data
+            has_angles_data = has_angles_key and len(training_data['neg_abs_angles']) > 0
+
+            print(f"[DEBUG] Keys in training_data: {list(training_data.keys())}")
+            print(f"[DEBUG] Angle check: key_exists={has_angles_key}, has_data={has_angles_data}")
+            if has_angles_key:
+                print(f"[DEBUG] Number of angle entries: {len(training_data['neg_abs_angles'])}")
+
+            if has_predictions and has_targets and has_angles_data:
+                self._plot_critic_vs_angle(training_data['critic_predictions'],
+                                           training_data['critic_targets'],
+                                           training_data['neg_abs_angles'],
+                                           'critic_vs_angle.png')
+                print(f"[*] Plotted critic vs angle signal{' (saved)' if self.save_dir else ''}")
+            else:
+                print(f"[!] Could not plot critic vs angle: predictions={has_predictions}, targets={has_targets}, angles={has_angles_data}")
     
     def _plot_error(self, errors: list[float], filename: str):
         """Plot training errors (TD errors, model errors, etc.)."""
@@ -472,6 +582,48 @@ class PlottingManager:
         ax.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.3)
         PlotTools.apply_common_styling(ax, 'Training Step', 'Gradient Value (∂V/∂x)',
                                       'Critic Gradient Evolution Over Training')
+        plt.tight_layout()
+        PlotTools.save_or_show(fig, self._get_save_path(filename))
+
+    def _plot_critic_vs_angle(self, critic_predictions: list[float], critic_targets: list[float],
+                              neg_abs_angles: list[float], filename: str = 'critic_vs_angle.png'):
+        """
+        Plot critic predictions, targets, and negative absolute angle signal on the same plot.
+
+        This visualizes how well the critic tracks the actual system dynamics.
+
+        Args:
+            critic_predictions: List of critic network predictions (value estimates)
+            critic_targets: List of TD target values
+            neg_abs_angles: List of negative absolute angles (-|theta|) as reference signal
+            filename: Filename for saving the plot
+        """
+        print(f"[DEBUG] _plot_critic_vs_angle called with {len(critic_predictions)} predictions, {len(critic_targets)} targets, {len(neg_abs_angles)} angles")
+
+        if not critic_predictions or not critic_targets or not neg_abs_angles:
+            print(f"[DEBUG] Empty data - returning early")
+            return
+
+        # Convert to numpy arrays
+        predictions = np.array(critic_predictions)
+        targets = np.array(critic_targets)
+        angles = np.array(neg_abs_angles)
+
+        print(f"[DEBUG] Predictions shape: {predictions.shape}, Targets shape: {targets.shape}, Angles shape: {angles.shape}")
+
+        timesteps = np.arange(len(predictions))
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=(14, 6))
+
+        # Plot all three signals
+        ax.plot(timesteps, predictions, 'b-', linewidth=2, alpha=0.8, label='Critic Prediction')
+        ax.plot(timesteps, targets, 'orange', linewidth=2, alpha=0.8, label='Critic Target')
+        ax.plot(timesteps, angles, 'r--', linewidth=2, alpha=0.8, label='-|Angle| (Reference)')
+
+        ax.axhline(y=0, color='black', linestyle=':', linewidth=1, alpha=0.3)
+        PlotTools.apply_common_styling(ax, 'Training Step', 'Value / Signal',
+                                      'Critic Predictions vs Targets vs Angle Signal')
         plt.tight_layout()
         PlotTools.save_or_show(fig, self._get_save_path(filename))
 

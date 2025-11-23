@@ -167,7 +167,18 @@ class RLSModel():
 
         # RLS update equations with forgetting factor
         P_phi = self.P @ phi  # shape (obs_dim + act_dim,)
-        denominator = self.forgetting_factor + np.dot(phi, P_phi)  # scalar
+
+        phi_P_phi = np.dot(phi, P_phi)
+        denominator = self.forgetting_factor + phi_P_phi  # scalar
+
+        # SAFEGUARD: If φᵀPφ is negative, P has become indefinite - RESET IT
+        if phi_P_phi < 0:
+            self.P = np.eye(self.obs_dim + self.act_dim, dtype=np.float32) * self.initial_covariance
+            # Recompute with fresh P
+            P_phi = self.P @ phi
+            phi_P_phi = np.dot(phi, P_phi)
+            denominator = self.forgetting_factor + phi_P_phi
+
         gain = P_phi / denominator  # shape (obs_dim + act_dim,)
 
         # Prediction error for each state dimension
@@ -178,7 +189,16 @@ class RLSModel():
         self.Theta += np.outer(err, gain)
 
         # Update covariance matrix with forgetting factor
-        self.P = (self.P - np.outer(gain, phi) @ self.P) / self.forgetting_factor
+        outer_prod = np.outer(gain, phi)
+        P_new = self.P - outer_prod @ self.P
+
+        self.P = P_new / self.forgetting_factor
+
+
+        # Track update count
+        if not hasattr(self, '_update_count'):
+            self._update_count = 0
+        self._update_count += 1
 
     def get_jacobians(self) -> tuple:
         """
@@ -263,8 +283,13 @@ class IHDPAgent():
         # Environment state
         print("\n--- ENVIRONMENT STATE ---")
         print(f"State: {obs}")
-        print(f"  cart_pos={obs[0]:.4f}, cart_vel={obs[1]:.4f}, angle={obs[2]:.4f}, angular_vel={obs[3]:.4f}")
-        print(f"Action taken (from env): {action.item():.4f} N")
+        if len(obs) == 4:
+            print(f"  cart_pos={obs[0]:.4f}, cart_vel={obs[1]:.4f}, angle={obs[2]:.4f}, angular_vel={obs[3]:.4f}")
+        elif len(obs) == 3:
+            print(f"  alpha={obs[0]:.4f}, q={obs[1]:.4f}, alpha_ref={obs[2]:.4f}")
+        else:
+            print(f"  {', '.join([f'dim_{i}={obs[i]:.4f}' for i in range(len(obs))])}")
+        print(f"Action taken (from env): {action.item() if hasattr(action, 'item') else action[0]:.4f}")
         print(f"Reward: {reward:.4f}")
         print(f"Next state: {next_obs}")
 
@@ -296,21 +321,29 @@ class IHDPAgent():
         # Critic gradient
         print("\n--- CRITIC GRADIENT (dV/dx) ---")
         print(f"dV/dx = {dVdx}")
-        print(f"  dV/d(cart_pos) = {dVdx[0]:.6f} {'(+: right is better, -: left is better)' if abs(dVdx[0]) > 1e-6 else '(~0: neutral)'}")
-        print(f"  dV/d(cart_vel) = {dVdx[1]:.6f}")
-        print(f"  dV/d(angle)    = {dVdx[2]:.6f} {'(+: more upright is better, -: more fallen is better)' if abs(dVdx[2]) > 1e-6 else '(~0: neutral)'}")
-        print(f"  dV/d(ang_vel)  = {dVdx[3]:.6f}")
+        if len(dVdx) == 4:
+            print(f"  dV/d(cart_pos) = {dVdx[0]:.6f} {'(+: right is better, -: left is better)' if abs(dVdx[0]) > 1e-6 else '(~0: neutral)'}")
+            print(f"  dV/d(cart_vel) = {dVdx[1]:.6f}")
+            print(f"  dV/d(angle)    = {dVdx[2]:.6f} {'(+: more upright is better, -: more fallen is better)' if abs(dVdx[2]) > 1e-6 else '(~0: neutral)'}")
+            print(f"  dV/d(ang_vel)  = {dVdx[3]:.6f}")
+        elif len(dVdx) == 3:
+            print(f"  dV/d(alpha)     = {dVdx[0]:.6f}")
+            print(f"  dV/d(q)         = {dVdx[1]:.6f}")
+            print(f"  dV/d(alpha_ref) = {dVdx[2]:.6f}")
+        else:
+            for i, val in enumerate(dVdx):
+                print(f"  dV/d(state_{i})  = {val:.6f}")
         dVdx_norm = np.linalg.norm(dVdx)
         print(f"||dV/dx|| = {dVdx_norm:.6f}")
 
         if dVdx_norm < 1e-6:
-            print("⚠️  WARNING: Critic gradient vanishing!")
+            print("[WARNING] Critic gradient vanishing!")
         else:
-            print("✓ Gradient magnitude is healthy")
+            print("[OK] Gradient magnitude is healthy")
 
         # Actor gradient computation
         print("\n--- ACTOR GRADIENT COMPUTATION ---")
-        print(f"dV/dx @ G = {dVdx_G} (this is ∂V/∂u)")
+        print(f"dV/dx @ G = {dVdx_G} (this is dV/du)")
         dvdu_val = dVdx_G.item() if dVdx_G.size == 1 else dVdx_G[0]
         dldu_val_actual = dLdu.item() if dLdu.numel() == 1 else dLdu[0].item()
         print(f"  Interpretation: If action increases by 1N, V changes by {dvdu_val:.6f}")
@@ -328,9 +361,9 @@ class IHDPAgent():
 
         # Sanity checks
         if abs(predicted_new_action) > 9.0:
-            print("⚠️  WARNING: Actor will saturate at action limits!")
+            print("[WARNING] Actor will saturate at action limits!")
         if abs(dldu_val) > 10.0:
-            print("⚠️  WARNING: Very large gradient - might cause instability!")
+            print("[WARNING] Very large gradient - might cause instability!")
 
         # Actual parameter gradients
         print("\n--- ACTUAL PARAMETER GRADIENTS (before clipping) ---")
@@ -583,15 +616,15 @@ class IHDPAgent():
         V_next = self.critic(x_next_pred_torch)
         actor_loss_value = -V_next.item()
 
-        # 4️⃣ Compute ∂V/∂x_{t+1}
+        # 4️⃣ Compute dV/dx_{t+1}
         V_next.backward()
         dVdx = x_next_pred_torch.grad.detach().numpy().squeeze()
 
         # 5️⃣ Get model Jacobian G_t
         _, G_t = self.model.get_jacobians()
 
-        # 6️⃣ Compute gradient: ∂L/∂u = -∂V/∂x * ∂x/∂u
-        dVdx_G = dVdx @ G_t  # This is ∂V/∂u (how V changes with action)
+        # 6️⃣ Compute gradient: ∂L/∂u = -dV/dx * ∂x/∂u
+        dVdx_G = dVdx @ G_t  # This is dV/du (how V changes with action)
         dLdu = -torch.FloatTensor(dVdx_G)  # Negative because we want to maximize V
 
         # Prepare debug variables (needed for _debug method)
@@ -649,7 +682,7 @@ class IHDPAgent():
                     sat_pct = stats['saturation_pct']
                     print(f"  Tanh Saturation: {sat_pct:.1f}%", end="")
                     if stats['saturated']:
-                        print(" ⚠️  HIGH SATURATION!")
+                        print(" [WARNING]  HIGH SATURATION!")
                     else:
                         print()
 
@@ -663,7 +696,7 @@ class IHDPAgent():
                     sat_pct = stats['saturation_pct']
                     print(f"  Tanh Saturation: {sat_pct:.1f}%", end="")
                     if stats['saturated']:
-                        print(" ⚠️  HIGH SATURATION!")
+                        print(" [WARNING]  HIGH SATURATION!")
                     else:
                         print()
 
@@ -674,12 +707,18 @@ class IHDPAgent():
                 print(f"  Grad norm: {stats['grad_norm']:.8f}, Grad mean: {stats['grad_mean']:.8f}, Grad max: {stats['grad_max']:.8f}")
                 print(f"  Param norm: {stats['param_norm']:.6f}")
                 if stats['grad_norm'] < 1e-6:
-                    print("  ⚠️  VANISHING GRADIENT!")
+                    print("  [WARNING]  VANISHING GRADIENT!")
 
             print("\n=== FINITE-DIFFERENCE GRADIENT VERIFICATION ===")
             print("Comparing autograd dVdx with finite-difference approximation...")
             fd_verify = self._verify_critic_gradient_finite_diff(x_next_pred_torch, dVdx)
-            state_labels = ['cart_pos', 'cart_vel', 'angle', 'ang_vel']
+            # Use generic or environment-specific labels
+            if len(dVdx) == 4:
+                state_labels = ['cart_pos', 'cart_vel', 'angle', 'ang_vel']
+            elif len(dVdx) == 3:
+                state_labels = ['alpha', 'q', 'alpha_ref']
+            else:
+                state_labels = [f'state_{i}' for i in range(len(dVdx))]
             print(f"\n{'State':<15} {'Autograd':<15} {'Finite-Diff':<15} {'Abs Diff':<15} {'Rel Error':<15}")
             print("-" * 75)
             for i in range(len(dVdx)):
@@ -692,7 +731,7 @@ class IHDPAgent():
             print(f"\nMax absolute difference: {fd_verify['max_abs_diff']:.8e}")
             print(f"Max relative error: {fd_verify['max_rel_error']:.4f}")
             if fd_verify['max_abs_diff'] > 1e-3:
-                print("⚠️  Large discrepancy between autograd and finite-diff! Check gradient computation.")
+                print("[WARNING]  Large discrepancy between autograd and finite-diff! Check gradient computation.")
 
         # ------- Update memory -------
         self.prev_obs = obs_torch.detach()
@@ -719,7 +758,9 @@ class IHDPAgent():
             if isinstance(module, nn.Linear):
                 critic_weights_by_layer[f'layer_{i}_weight'] = module.weight.data.cpu().numpy().copy()
                 critic_weights_by_layer[f'layer_{i}_bias'] = module.bias.data.cpu().numpy().copy()
-                
+
+        # Extract angle (theta) from current observation (index 2 for pendulum cart)
+        theta = obs[2] if len(obs) > 2 else 0.0
 
         self.step += 1
 
@@ -751,4 +792,5 @@ class IHDPAgent():
             'actor_weights': actor_weights_by_layer,
             'critic_weights': critic_weights_by_layer,
             'dVdx': dVdx,
+            'theta': theta,
         }
