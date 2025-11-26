@@ -232,9 +232,10 @@ class RLSModel():
         return next_x
 
 class IHDPAgent():
-    def __init__(self, obs_space: gym.Space, act_space: gym.Space, gamma: float, forgetting_factor: float, initial_covariance: float, hidden_sizes: dict[str, list[int]], learning_rates: dict[str, float], critic_weight_limit: float = 30.0, actor_weight_limit: float = 3e-3):
+    def __init__(self, obs_space: gym.Space, act_space: gym.Space, gamma: float, forgetting_factor: float, initial_covariance: float, hidden_sizes: dict[str, list[int]], learning_rates: dict[str, float], critic_weight_limit: float = 30.0, actor_weight_limit: float = 30.0):
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"IHDP Agent using device: {self.device}")
 
         # Spaces
         self.obs_dim = obs_space.shape[0]
@@ -263,7 +264,7 @@ class IHDPAgent():
     def _debug(self, step: int, obs: np.ndarray, action: np.ndarray, reward: float, next_obs: np.ndarray,
                value_pred: torch.Tensor, target_value: torch.Tensor, td_error: torch.Tensor,
                critic_weight_before: torch.Tensor, critic_weight_after: torch.Tensor,
-               actor_action_scaled: torch.Tensor, x_next_pred_np: np.ndarray, dVdx: np.ndarray,
+               actor_action: torch.Tensor, x_next_pred_np: np.ndarray, dVdx: np.ndarray,
                dVdx_G: np.ndarray, dLdu: torch.Tensor, G_t: np.ndarray, current_action: float,
                lr_actor: float, dldu_val: float, predicted_action_change: float, predicted_new_action: float,
                new_action: float):
@@ -300,7 +301,7 @@ class IHDPAgent():
 
         # Actor forward pass
         print("\n--- ACTOR FORWARD PASS ---")
-        print(f"Actor output (what it wants to do): {actor_action_scaled.detach().squeeze().item():.4f} N")
+        print(f"Actor output (what it wants to do): {actor_action.detach().squeeze().item():.4f} N")
         print(f"(Compare to action taken: {action.item():.4f} N)")
 
         # Model prediction
@@ -481,6 +482,118 @@ class IHDPAgent():
 
         return stats
 
+    def _verify_actor_gradient_chain_rule(self, obs_torch: torch.Tensor, actor_action: torch.Tensor,
+                                          dVdx: np.ndarray, G_t: np.ndarray, dLdu_manual: np.ndarray,
+                                          epsilon: float = 1e-4) -> dict:
+        """
+        Verify the actor gradient chain rule: dL/dparams = dL/du * du/dparams
+
+        Components:
+        - dL/du = -dV/dx * G (manually computed)
+        - du/dparams is what PyTorch's backward should compute
+
+        This method:
+        1. Verifies dV/du computation numerically
+        2. Checks actor parameter gradients exist and are reasonable
+        3. Optionally verifies via finite differences on action w.r.t. params
+        """
+        stats = {}
+
+        # 1️⃣ Verify dV/du = dV/dx @ G numerically
+        print("\n--- CHAIN RULE COMPONENT 1: dV/du (dV/dx @ G) ---")
+        dVdu_analytical = dVdx @ G_t
+        stats['dVdu_analytical'] = dVdu_analytical
+        print(f"dV/du (analytical) = {dVdu_analytical}")
+
+        # Finite difference check: perturb action slightly and measure V change
+        u_np = np.atleast_1d(actor_action.detach().squeeze().numpy())
+        obs_np = np.atleast_1d(obs_torch.detach().squeeze().numpy())
+
+        dVdu_fd = np.zeros_like(u_np)
+        for i in range(len(u_np)):
+            # Predict next state with perturbed action (positive)
+            u_plus = u_np.copy()
+            u_plus[i] += epsilon
+            x_next_plus = self.model.predict(obs_np, u_plus)
+            V_plus = self.critic(torch.FloatTensor(x_next_plus).unsqueeze(0)).item()
+
+            # Predict next state with perturbed action (negative)
+            u_minus = u_np.copy()
+            u_minus[i] -= epsilon
+            x_next_minus = self.model.predict(obs_np, u_minus)
+            V_minus = self.critic(torch.FloatTensor(x_next_minus).unsqueeze(0)).item()
+
+            # Central difference
+            dVdu_fd[i] = (V_plus - V_minus) / (2 * epsilon)
+
+        stats['dVdu_fd'] = dVdu_fd
+        print(f"dV/du (finite diff) = {dVdu_fd}")
+        dVdu_diff = np.abs(dVdu_analytical - dVdu_fd)
+        print(f"Difference: {dVdu_diff}, max: {np.max(dVdu_diff):.8e}")
+        if np.max(dVdu_diff) > 1e-3:
+            print("[WARNING] Large discrepancy in dV/du!")
+
+        # 2️⃣ Print dL/du = -dV/du
+        print("\n--- CHAIN RULE COMPONENT 2: dL/du = -dV/du ---")
+        dLdu_analytical = -dVdu_analytical
+        stats['dLdu_analytical'] = dLdu_analytical
+        print(f"dL/du (analytical) = {dLdu_analytical}")
+        print(f"dL/du (manual arg) = {dLdu_manual}")
+        match = np.allclose(dLdu_analytical, dLdu_manual, rtol=1e-5)
+        print(f"Match: {match}")
+
+        # 3️⃣ Print actor parameter gradients
+        print("\n--- CHAIN RULE COMPONENT 3: du/dparams (via PyTorch backward) ---")
+        param_grads = {}
+        for name, param in self.actor.named_parameters():
+            if param.grad is not None:
+                grad_np = param.grad.data.cpu().numpy()
+                param_grads[name] = grad_np
+                grad_norm = np.linalg.norm(grad_np)
+                grad_mean = np.mean(np.abs(grad_np))
+                print(f"{name}:")
+                print(f"  Shape: {grad_np.shape}")
+                print(f"  Norm: {grad_norm:.8f}, Mean abs: {grad_mean:.8f}")
+                if grad_norm < 1e-8:
+                    print("  [WARNING] Vanishing gradient!")
+        stats['param_grads'] = param_grads
+
+        # 4️⃣ Finite difference verification: du/dparam
+        print("\n--- FINITE DIFFERENCE: du/dparam (action sensitivity to weights) ---")
+        # Check first weight matrix as example
+        first_weight = None
+        for module in self.actor.model:
+            if isinstance(module, nn.Linear):
+                first_weight = module.weight
+                break
+
+        if first_weight is not None:
+            # Perturb one weight element
+            w_i, w_j = 0, 0
+            original_val = first_weight[w_i, w_j].item()
+
+            # Forward perturbation (use data to avoid grad tracking)
+            with torch.no_grad():
+                first_weight.data[w_i, w_j] = original_val + epsilon
+            u_plus = np.atleast_1d(self.actor(obs_torch).detach().squeeze().numpy())
+
+            # Backward perturbation
+            with torch.no_grad():
+                first_weight.data[w_i, w_j] = original_val - epsilon
+            u_minus = np.atleast_1d(self.actor(obs_torch).detach().squeeze().numpy())
+
+            # Restore
+            with torch.no_grad():
+                first_weight.data[w_i, w_j] = original_val
+
+            # Central difference: du/dw
+            du_dw_fd = (u_plus - u_minus) / (2 * epsilon)
+            print(f"du/dw[0,0] (finite diff) = {du_dw_fd}")
+            print(f"Shape matches first weight grad: {param_grads['0.weight'].shape if '0.weight' in param_grads else 'N/A'}")
+
+        print(f"\n{'='*80}\n")
+        return stats
+
     def _verify_critic_gradient_finite_diff(self, x_torch: torch.Tensor, dVdx_autograd: np.ndarray, epsilon: float = 1e-5) -> dict:
         """
         Verify autograd gradients using finite-difference approximation.
@@ -565,7 +678,7 @@ class IHDPAgent():
 
         # --- Convert inputs to torch tensors ---
         obs_torch = torch.FloatTensor(obs).unsqueeze(0)
-        action_torch = torch.FloatTensor(action).unsqueeze(0)
+        action_torch = torch.FloatTensor(action).unsqueeze(0) # True action
         reward_torch = torch.FloatTensor([reward]).unsqueeze(0)
         next_obs_torch = torch.FloatTensor(next_obs).unsqueeze(0)
         
@@ -601,12 +714,11 @@ class IHDPAgent():
 
         # ------- Update Actor (manual gradient via RLS Jacobian) -------
         # 1️⃣ Forward pass through actor
-        actor_action_scaled = self.actor(obs_torch)
-        actor_action_scaled.retain_grad()
+        actor_action = self.actor(obs_torch)  # still in [-1,1] range
 
         # 2️⃣ Predict next state with actor's scaled action
         x_np = obs_torch.detach().squeeze().numpy()
-        u_np = actor_action_scaled.detach().squeeze().numpy()
+        u_np = actor_action.detach().squeeze().numpy()
 
         x_next_pred_np = self.model.predict(x_np, u_np)
         x_next_pred_torch = torch.FloatTensor(x_next_pred_np).unsqueeze(0)
@@ -617,6 +729,7 @@ class IHDPAgent():
         actor_loss_value = -V_next.item()
 
         # 4️⃣ Compute dV/dx_{t+1}
+        self.critic.zero_grad()
         V_next.backward()
         dVdx = x_next_pred_torch.grad.detach().numpy().squeeze()
 
@@ -624,11 +737,11 @@ class IHDPAgent():
         _, G_t = self.model.get_jacobians()
 
         # 6️⃣ Compute gradient: ∂L/∂u = -dV/dx * ∂x/∂u
-        dVdx_G = dVdx @ G_t  # This is dV/du (how V changes with action)
-        dLdu = -torch.FloatTensor(dVdx_G)  # Negative because we want to maximize V
+        dVdx_G = dVdx @ G_t  # Shape: (act_dim,)
+        dLdu = -torch.FloatTensor(dVdx_G).unsqueeze(0)  # Negative because we want to maximize V
 
         # Prepare debug variables (needed for _debug method)
-        current_action = actor_action_scaled.detach().squeeze().item()
+        current_action = actor_action.detach().squeeze().item()
         lr_actor = self.actor_optimizer.param_groups[0]['lr']
         dldu_val = dLdu.item() if dLdu.numel() == 1 else dLdu[0].item()
         predicted_action_change = -lr_actor * dldu_val
@@ -636,7 +749,21 @@ class IHDPAgent():
 
         # 7️⃣ Apply manual gradient to actor
         self.actor.zero_grad()
-        actor_action_scaled.backward(dLdu.unsqueeze(0))
+        actor_action.backward(dLdu)
+
+        # Verify gradient chain rule (optional - only when step % 10 == 0)
+        if self.step % 10 == 0:
+            print("\n" + "="*80)
+            print("ACTOR GRADIENT CHAIN RULE VERIFICATION")
+            print("="*80)
+            self._verify_actor_gradient_chain_rule(
+                obs_torch=obs_torch,
+                actor_action=actor_action,
+                dVdx=dVdx,
+                G_t=G_t,
+                dLdu_manual=dLdu.detach().numpy(),
+                epsilon=1e-4
+            )
 
         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
         self.actor_optimizer.step()
@@ -657,7 +784,7 @@ class IHDPAgent():
                 td_error=td_error,
                 critic_weight_before=critic_weight_before,
                 critic_weight_after=critic_weight_after,
-                actor_action_scaled=actor_action_scaled,
+                actor_action=actor_action,
                 x_next_pred_np=x_next_pred_np,
                 dVdx=dVdx,
                 dVdx_G=dVdx_G,

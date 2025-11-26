@@ -280,7 +280,7 @@ if __name__ == "__main__":
     initial_covariance = 0.99
     gamma = 0.0
     lr_actor = 0.001
-    lr_critic = 1e-1
+    lr_critic = 0.1
     # lr_model = 5e-1
     actor_sizes = [6, 6]
     critic_sizes = [6, 6]

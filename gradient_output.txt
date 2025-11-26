@@ -1,0 +1,241 @@
+C:\Users\angel\AppData\Local\Programs\Python\Python312\Lib\site-packages\gymnasium\spaces\box.py:235: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+C:\Users\angel\AppData\Local\Programs\Python\Python312\Lib\site-packages\gymnasium\spaces\box.py:305: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+
+================================================================================
+STEP 0 - Running update...
+================================================================================
+
+
+=== Critic Architecture ===
+Layer 0: Linear(in_features=3, out_features=64, bias=True)
+Layer 1: Tanh()
+Layer 2: Linear(in_features=64, out_features=64, bias=True)
+Layer 3: Tanh()
+Layer 4: Linear(in_features=64, out_features=1, bias=True)
+========================================
+
+
+================================================================================
+ACTOR GRADIENT CHAIN RULE VERIFICATION
+================================================================================
+
+--- CHAIN RULE COMPONENT 1: dV/du (dV/dx @ G) ---
+dV/du (analytical) = [-2.1438713e-09]
+dV/du (finite diff) = [0.]
+Difference: [2.1438713e-09], max: 2.14387130e-09
+
+--- CHAIN RULE COMPONENT 2: dL/du = -dV/du ---
+dL/du (analytical) = [2.1438713e-09]
+dL/du (manual arg) = [[2.1438713e-09]]
+Match: True
+
+--- CHAIN RULE COMPONENT 3: du/dparams (via PyTorch backward) ---
+output_layer.weight:
+  Shape: (1, 64)
+  Norm: 0.00000000, Mean abs: 0.00000000
+  [WARNING] Vanishing gradient!
+output_layer.bias:
+  Shape: (1,)
+  Norm: 0.00000000, Mean abs: 0.00000000
+  [WARNING] Vanishing gradient!
+model.0.weight:
+  Shape: (64, 3)
+  Norm: 0.00000000, Mean abs: 0.00000000
+  [WARNING] Vanishing gradient!
+model.0.bias:
+  Shape: (64,)
+  Norm: 0.00000000, Mean abs: 0.00000000
+  [WARNING] Vanishing gradient!
+model.2.weight:
+  Shape: (64, 64)
+  Norm: 0.00000000, Mean abs: 0.00000000
+  [WARNING] Vanishing gradient!
+model.2.bias:
+  Shape: (64,)
+  Norm: 0.00000000, Mean abs: 0.00000000
+  [WARNING] Vanishing gradient!
+
+--- FINITE DIFFERENCE: du/dparam (action sensitivity to weights) ---
+du/dw[0,0] (finite diff) = [0.]
+Shape matches first weight grad: N/A
+
+================================================================================
+
+
+=== Critic Architecture ===
+Layer 0: Linear(in_features=3, out_features=64, bias=True)
+Layer 1: Tanh()
+Layer 2: Linear(in_features=64, out_features=64, bias=True)
+Layer 3: Tanh()
+Layer 4: Linear(in_features=64, out_features=1, bias=True)
+========================================
+
+
+================================================================================
+STEP 0
+================================================================================
+
+--- ENVIRONMENT STATE ---
+State: [0.00101813 0.0062293  0.        ]
+  alpha=0.0010, q=0.0062, alpha_ref=0.0000
+Action taken (from env): 1.0000
+Reward: -0.0000
+Next state: [ 0.00071051 -0.02353101  0.        ]
+
+--- CRITIC UPDATE ---
+V_pred=0.0000, V_target=-0.0000, TD_error=-0.0000
+Critic weight change: 0.000000
+
+--- ACTOR FORWARD PASS ---
+Actor output (what it wants to do): 1.0000 N
+(Compare to action taken: 1.0000 N)
+
+--- MODEL PREDICTION ---
+G matrix (control sensitivity):
+[[-0.00015458]
+ [-0.01495463]
+ [ 0.        ]]
+Model predicts next state: [ 0.00086354 -0.00872592  0.        ]
+True next state:           [ 0.00071051 -0.02353101  0.        ]
+Model prediction error: 0.014806
+
+--- CRITIC EVALUATION OF PREDICTED STATE ---
+V(predicted_next_state) = -0.0099
+Actor loss (negative value) = 0.0099
+
+--- CRITIC GRADIENT (dV/dx) ---
+dV/dx = [2.7898537e-07 1.4047453e-07 8.3361137e-08]
+  dV/d(alpha)     = 0.000000
+  dV/d(q)         = 0.000000
+  dV/d(alpha_ref) = 0.000000
+||dV/dx|| = 0.000000
+[WARNING] Critic gradient vanishing!
+
+--- ACTOR GRADIENT COMPUTATION ---
+dV/dx @ G = [-2.1438713e-09] (this is dV/du)
+  Interpretation: If action increases by 1N, V changes by -0.000000
+dL/du = --0.000000 = 0.000000
+  Interpretation: Gradient descent will DECREASE action to maximize V
+||dL/du|| = 0.000000
+
+--- GRADIENT STEP PREDICTION ---
+Learning rate: 0.001
+Current action output: 1.0000 N
+Gradient: 0.000000
+Predicted action change: -0.000000 N
+Predicted new action: 1.0000 N
+
+--- ACTUAL PARAMETER GRADIENTS (before clipping) ---
+output_layer.weight: grad_norm=0.000000, grad_mean=0.000000
+output_layer.bias: grad_norm=0.000000, grad_mean=0.000000
+model.0.weight: grad_norm=0.000000, grad_mean=0.000000
+model.0.bias: grad_norm=0.000000, grad_mean=0.000000
+model.2.weight: grad_norm=0.000000, grad_mean=0.000000
+model.2.bias: grad_norm=0.000000, grad_mean=0.000000
+
+--- AFTER ACTOR UPDATE ---
+New actor output: 1.0000 N (was 1.0000 N)
+Actual change: 0.000000 N
+================================================================================
+
+
+=== ACTOR ACTIVATION DIAGNOSTICS ===
+
+layer_0 (Linear):
+  Output range: [-0.1928, 0.1818]
+  Mean: -0.0044, Std: 0.1121
+
+layer_1 (Tanh):
+  Output range: [-0.1905, 0.1798]
+  Mean: -0.0044, Std: 0.1113
+  Tanh Saturation: 0.0%
+
+layer_2 (Linear):
+  Output range: [-35.2102, 37.4300]
+  Mean: 1.0565, Std: 13.5994
+
+layer_3 (Tanh):
+  Output range: [-1.0000, 1.0000]
+  Mean: 0.0155, Std: 0.9761
+  Tanh Saturation: 82.8% [WARNING]  HIGH SATURATION!
+
+layer_4 (Linear):
+  Output range: [85.8387, 85.8387]
+  Mean: 85.8387, Std: 0.0000
+
+layer_5 (Tanh):
+  Output range: [1.0000, 1.0000]
+  Mean: 1.0000, Std: 0.0000
+  Tanh Saturation: 100.0% [WARNING]  HIGH SATURATION!
+
+=== CRITIC ACTIVATION DIAGNOSTICS ===
+
+layer_0 (Linear):
+  Output range: [-0.0000, 0.0000]
+  Mean: -0.0000, Std: 0.0000
+
+layer_1 (Tanh):
+  Output range: [-0.0000, 0.0000]
+  Mean: -0.0000, Std: 0.0000
+  Tanh Saturation: 0.0%
+
+layer_2 (Linear):
+  Output range: [-0.0013, 0.0013]
+  Mean: -0.0002, Std: 0.0008
+
+layer_3 (Tanh):
+  Output range: [-0.0013, 0.0013]
+  Mean: -0.0002, Std: 0.0008
+  Tanh Saturation: 0.0%
+
+layer_4 (Linear):
+  Output range: [-0.0099, -0.0099]
+  Mean: -0.0099, Std: 0.0000
+
+=== CRITIC GRADIENT DIAGNOSTICS ===
+model.0.weight:
+  Grad norm: 0.00000001, Grad mean: 0.00000000, Grad max: 0.00000000
+  Param norm: 0.013647
+  [WARNING]  VANISHING GRADIENT!
+model.0.bias:
+  Grad norm: 0.00000127, Grad mean: 0.00000013, Grad max: 0.00000042
+  Param norm: 0.000065
+model.2.weight:
+  Grad norm: 0.00000001, Grad mean: 0.00000000, Grad max: 0.00000000
+  Param norm: 0.063672
+  [WARNING]  VANISHING GRADIENT!
+model.2.bias:
+  Grad norm: 0.00014131, Grad mean: 0.00001549, Grad max: 0.00002936
+  Param norm: 0.006518
+model.4.weight:
+  Grad norm: 0.00006453, Grad mean: 0.00000716, Grad max: 0.00001299
+  Param norm: 0.014274
+model.4.bias:
+  Grad norm: 0.00989984, Grad mean: 0.00989984, Grad max: 0.00989984
+  Param norm: 0.009807
+
+=== FINITE-DIFFERENCE GRADIENT VERIFICATION ===
+Comparing autograd dVdx with finite-difference approximation...
+
+State           Autograd        Finite-Diff     Abs Diff        Rel Error      
+---------------------------------------------------------------------------
+alpha           0.00000028      0.00000000      2.78985368e-07  2789.8537      
+q               0.00000014      0.00000000      1.40474526e-07  1404.7453      
+alpha_ref       0.00000008      0.00000000      8.33611367e-08  833.6114       
+
+Max absolute difference: 2.78985368e-07
+Max relative error: 2789.8537
+
+================================================================================
+STEP 1 - Running update...
+================================================================================
+
+
+================================================================================
+STEP 2 - Running update...
+================================================================================
+
+
+Done! Check output above for ACTOR GRADIENT CHAIN RULE VERIFICATION section

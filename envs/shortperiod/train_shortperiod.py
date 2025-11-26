@@ -4,6 +4,8 @@ import numpy as np
 import torch
 import tqdm
 from datetime import datetime
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from agents.IHDP.ihdp import IHDPAgent
 from envs.shortperiod.shortperiod import ShortPeriodEnv
@@ -48,9 +50,8 @@ def train_ihdp(env: ShortPeriodEnv, agent: IHDPAgent, max_steps: int) -> dict:
     
     for step in tqdm.tqdm(range(max_steps), desc="Training IHDP Agent", unit="step"):
         action = agent.get_action(obs) # [-1,1] scaled action
-        scaled_action = env.action_space.low + (0.5 * (action + 1.0) * (env.action_space.high - env.action_space.low))
-        action = scaled_action.astype(np.float32)
-        next_obs, reward, terminated, truncated, info = env.step(action)
+        scaled_action = env.action_space.low + (0.5 * (action + 1.0) * (env.action_space.high - env.action_space.low)).astype(np.float32)
+        next_obs, reward, terminated, truncated, info = env.step(scaled_action)
         done = terminated or truncated
 
         metrics = agent.update(obs, action, reward, terminated, next_obs)
@@ -104,9 +105,8 @@ initial_covariance = 0.99
 gamma = 0.0
 lr_actor = 0.01
 lr_critic = 1e-2
-actor_sizes = [6, 6]
-critic_sizes = [6, 6]
-model_sizes = [10, 10]
+actor_sizes = [2, 2]
+critic_sizes = [2, 2]
 actor_weight_limit = 0.5
 critic_weight_limit =0.5
 
